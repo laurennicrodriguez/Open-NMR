@@ -154,6 +154,94 @@ def build_blocks(
     return blocks
 
 
+class SpinKernel:
+    """Precomputed structure of H for one spin-system *topology*.
+
+    Everything that depends only on the number of spins, their nuclei and which pairs
+    are coupled — block membership, the z-magnetization of every basis state, the
+    flip-flop matrix positions and the F₋ index arrays between blocks — is computed
+    once. :meth:`evaluate` then only fills in shifts and couplings and diagonalizes,
+    which is what a lineshape fit does hundreds of times.
+    """
+
+    def __init__(
+        self,
+        n: int,
+        nuclei: Sequence[str],
+        pairs: Sequence[tuple[int, int]],
+        observed: str = "1H",
+    ) -> None:
+        self.n = n
+        self.pairs = [tuple(sorted(p)) for p in pairs]
+        self.obs = [k for k, nuc in enumerate(nuclei) if nuc == observed]
+        if not self.obs:
+            raise ValueError(f"no {observed} spins in the system")
+        obs_set = set(self.obs)
+        het = [k for k in range(n) if k not in obs_set]
+        all_states = np.arange(1 << n, dtype=np.int64)
+        m2 = sum(2 * _bits(all_states, k) - 1 for k in self.obs)
+        hbits = np.zeros_like(all_states)
+        for pos, k in enumerate(het):
+            hbits |= _bits(all_states, k) << pos
+        index = np.full(1 << n, -1, dtype=np.int64)
+        self.blocks: dict[tuple[int, int], dict] = {}
+        for key2, hb in np.unique(np.stack([m2, hbits], axis=1), axis=0):
+            states = all_states[(m2 == key2) & (hbits == hb)]
+            index[states] = np.arange(states.size)
+            mz = np.array([_bits(states, k) - 0.5 for k in range(n)])
+            zz = (
+                np.array([mz[a] * mz[b] for a, b in self.pairs])
+                if self.pairs
+                else np.zeros((0, states.size))
+            )
+            flips = []
+            for p, (a, b) in enumerate(self.pairs):
+                if a in obs_set and b in obs_set:
+                    src = states[_bits(states, a) != _bits(states, b)]
+                    dst = src ^ ((1 << a) | (1 << b))
+                    flips.append((p, index[src].copy(), index[dst].copy()))
+            self.blocks[(int(key2), int(hb))] = {
+                "states": states, "mz_obs": mz[self.obs], "zz": zz, "flips": flips,
+            }  # fmt: skip
+        # F₋ = Σ_k I₋k between neighbouring blocks: (lower rows, upper cols) per spin k
+        self.links = []
+        for (m2_, hb), up in self.blocks.items():
+            low = self.blocks.get((m2_ - 2, hb))
+            if low is None:
+                continue
+            per_k = []
+            for k in self.obs:
+                src = up["states"][((up["states"] >> k) & 1) == 1]
+                per_k.append((
+                    k,
+                    np.searchsorted(low["states"], src ^ (1 << k)),
+                    np.searchsorted(up["states"], src),
+                ))  # fmt: skip
+            self.links.append(((m2_ - 2, hb), (m2_, hb), per_k))
+
+    @classmethod
+    def for_system(cls, system: SpinSystem, observed: str = "1H") -> SpinKernel:
+        pairs = [(a, b) for a, b in combinations(range(system.n), 2) if system.j_matrix[a, b]]
+        return cls(system.n, system.nuclei, pairs, observed)
+
+    def evaluate(
+        self, nu_hz: np.ndarray, j_pairs: np.ndarray
+    ) -> dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]:
+        """Eigenvalues and eigenvectors of every block for shifts ν (Hz, all spins) and
+        couplings J (Hz, in the order of :attr:`pairs`)."""
+        nu_obs = np.asarray(nu_hz, float)[self.obs]
+        jv = np.asarray(j_pairs, float)
+        out = {}
+        for key, b in self.blocks.items():
+            diag = nu_obs @ b["mz_obs"] + (jv @ b["zz"] if jv.size else 0.0)
+            h = np.diag(diag)
+            for p, rows, cols in b["flips"]:
+                if jv[p]:
+                    h[rows, cols] += 0.5 * jv[p]
+            out[key] = np.linalg.eigh(h)
+        return out
+
+
 def diagonalize(blocks: Mapping[tuple[int, int], Block]) -> None:
     for b in blocks.values():
         if b.energies is None:

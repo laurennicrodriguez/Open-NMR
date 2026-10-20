@@ -12,3 +12,6 @@ htmlcov/
 # Local-only spectra (see README: real-data tests)
 local_data/
 benchmark/compounds/*/raw/
+
+# Benchmark material from group data that is not cleared for publication
+benchmark/local/

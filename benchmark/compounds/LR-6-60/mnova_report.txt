@@ -1,0 +1,5 @@
+# Mnova automatic multiplet report, as provided by Lauren on 2026-10-20.
+# Compound: LR-6-60, a bioactive lobeline derivative (previously published; cleared for publication).
+# Raw folder: "LR-6-60-LOBELANE".
+# Mnova version: not recorded yet (spec: record it with every stored report).
+1H NMR (500 MHz, CDCl3) δ 7.41 – 7.31 (m, 4H), 7.32 – 7.13 (m, 6H), 3.03 – 2.39 (m, 6H), 1.95 – 1.59 (m, 7H), 1.61 – 1.32 (m, 4H), 1.25 – 1.06 (m, 1H).
