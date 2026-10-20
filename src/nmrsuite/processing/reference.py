@@ -107,6 +107,17 @@ RESIDUAL_PATTERN_HZ: dict[str, float] = {
     "CD2Cl2": 1.0, "THF-d8": 5.0, "pyridine-d5": 5.0,
 }  # fmt: skip
 
+#: Half-width (Hz) of each solvent's ¹³C multiplet from C–D coupling (1:1:1 triplet for
+#: CDCl₃, septets for CD₃ groups, …); the reference is the multiplet's centre.
+SOLVENT_13C_PATTERN_HZ: dict[str, float] = {
+    "CDCl3": 33.0, "DMSO-d6": 64.0, "CD3OD": 65.0, "acetone-d6": 60.0, "C6D6": 25.0,
+    "CD3CN": 63.0, "CD2Cl2": 55.0, "THF-d8": 65.0, "toluene-d8": 60.0, "pyridine-d5": 25.0,
+}  # fmt: skip
+
+#: Search half-width for nuclei other than ¹H: their unreferenced scale can be off by
+#: about 1 ppm (≈ 0.9 ppm for ¹³C in CD₃CN on our 500 MHz instrument).
+SEARCH_WINDOW_X_PPM = 1.5
+
 #: A reference candidate is "isolated" if no line ≥ this fraction of its height lies
 #: between 1.5 and 15 Hz beyond its own pattern (so it is not a line of a compound
 #: multiplet that happens to sit near the expected shift).
@@ -170,8 +181,22 @@ def find_reference_peak(
     ppms = d.offset_ppm - pool * step
     best = int(pool[np.argmin(np.abs(ppms - expected_ppm))])
     if pattern_hz:
-        own = maxima[np.abs(maxima - best) <= (pattern_hz + 0.5) * pts_per_hz]
-        best = int(own[np.argmax(y[own])])
+        # the reference is the centre of its own multiplet: the height-weighted centroid
+        # of its lines (centre of a symmetric quintet, septet or 1:1:1 triplet — picking
+        # the tallest line would be arbitrary for a 1:1:1 triplet)
+        centre: float = best
+        own = np.array([best])
+        for _ in range(3):  # re-centre: the nearest line may be an outer one
+            near = maxima[np.abs(maxima - centre) <= (pattern_hz + 0.5) * pts_per_hz]
+            # ignore small humps (broad feet, baseline ripple) that would skew the centre
+            near = near[y[near] >= 0.05 * y[near].max()] if near.size else near
+            if near.size == 0:
+                break
+            own = near
+            centre = float(np.average(own, weights=y[own] ** 2))
+        if own.size > 1:
+            return float(d.offset_ppm - centre * step)
+        best = int(own[0])
     return float(d.offset_ppm - refine_peak(y, best) * step)
 
 
@@ -192,12 +217,43 @@ def reference(
     ppm_to: float | None = None,
     delta: float = 0.0,
     h_ref_mhz: float | None = None,
-    window_ppm: float = SEARCH_WINDOW_PPM,
+    window_ppm: float | None = None,
+    required: bool = True,
 ) -> tuple[NMRData, dict[str, float | str]]:
-    """Reference the direct dimension; returns the dataset and the applied shift."""
+    """Reference the direct dimension; returns the dataset and the applied shift.
+
+    ``window_ppm`` defaults to ±0.15 ppm for ¹H and ±1.5 ppm for other nuclei. With
+    ``required=False`` a failed search leaves the scale unchanged and records a warning
+    instead of raising (used by the automatic chain).
+    """
     d = nmr.direct
     if d.domain != "frequency" or d.offset_ppm is None:
         raise ValueError("referencing needs a frequency axis")
+    is_h = d.nucleus == "1H"
+    if window_ppm is None:
+        window_ppm = SEARCH_WINDOW_PPM if is_h else SEARCH_WINDOW_X_PPM
+    try:
+        return _reference(nmr, method, solvent, ppm_from, ppm_to, delta, h_ref_mhz, window_ppm)
+    except (ValueError, KeyError) as err:
+        if required:
+            raise
+        msg = f"not referenced ({err}); scale left as acquired"
+        warnings.warn(msg, stacklevel=3)
+        return nmr.copy_with(), {"shift_ppm": 0.0, "warning": msg}
+
+
+def _reference(
+    nmr: NMRData,
+    method: str,
+    solvent: str | None,
+    ppm_from: float | None,
+    ppm_to: float | None,
+    delta: float,
+    h_ref_mhz: float | None,
+    window_ppm: float,
+) -> tuple[NMRData, dict[str, float | str]]:
+    d = nmr.direct
+    is_h = d.nucleus == "1H"
     info: dict[str, float | str] = {}
     if method == "solvent":
         name = canonical_solvent(solvent or solvent_of(nmr) or "")
@@ -205,18 +261,14 @@ def reference(
         if not shifts:
             raise ValueError(f"no {d.nucleus} reference shift for {name}")
         target = shifts[0]
-        is_h = d.nucleus == "1H"
+        pattern = (RESIDUAL_PATTERN_HZ if is_h else SOLVENT_13C_PATTERN_HZ).get(name, 0.0)
         shift = target - find_reference_peak(
-            nmr,
-            target,
-            window_ppm,
-            pattern_hz=RESIDUAL_PATTERN_HZ.get(name, 0.0) if is_h else 0.0,
-            prefer_isolated=is_h,
+            nmr, target, window_ppm, pattern_hz=pattern, prefer_isolated=is_h
         )
         info["solvent"] = name
         if d.nucleus == "1H":
             try:
-                tms_shift = -find_reference_peak(nmr, 0.0, window_ppm)
+                tms_shift = -find_reference_peak(nmr, 0.0, SEARCH_WINDOW_PPM)
             except ValueError:
                 tms_shift = None
             if tms_shift is not None and abs(tms_shift - shift) > REFERENCE_CONFLICT_PPM:
@@ -224,9 +276,9 @@ def reference(
                     f"solvent ({name}) and a singlet near 0 ppm (TMS or grease?) disagree "
                     f"by {abs(tms_shift - shift):.3f} ppm; solvent used"
                 )
-                warnings.warn(info["warning"], stacklevel=3)
+                warnings.warn(info["warning"], stacklevel=4)
     elif method == "tms":
-        shift = 0.0 - find_reference_peak(nmr, 0.0, window_ppm, prefer_isolated=d.nucleus == "1H")
+        shift = 0.0 - find_reference_peak(nmr, 0.0, window_ppm, prefer_isolated=is_h)
     elif method == "peak":
         if ppm_from is None or ppm_to is None:
             raise ValueError("method='peak' needs ppm_from and ppm_to")

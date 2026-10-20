@@ -81,6 +81,22 @@ def test_classification_solvent_water_impurity_satellites() -> None:
     assert at(3.945)[0] == at(3.655)[0] == "c13_satellite"
 
 
+def test_water_in_cd3cn_and_broad_solvent_foot() -> None:
+    lines = [(1.94, 0.3), (2.13, 1.5), (7.7, 4.0)]
+    s = synth_spectrum(lines, solvent="CD3CN", noise=1e-4)
+    broad = synth_spectrum([(1.925, 0.6)], solvent="CD3CN", fwhm_hz=60.0)
+    s = s.copy_with(data=s.data + broad.data)
+    pl = pick_peaks(s)
+
+    def kind(ppm: float) -> tuple[str, str]:
+        p = min(pl, key=lambda p: abs(p.ppm - ppm))
+        return p.kind, p.note
+
+    assert kind(2.13) == ("impurity", "water")
+    assert kind(1.94)[0] == "solvent"
+    assert all(p.kind == "solvent" for p in pl if 1.88 < p.ppm < 1.98)
+
+
 def test_classification_artifacts() -> None:
     s = synth_spectrum([(6.0, 1.0), (5.0, 1.0), (4.0, 1.0), (3.0, 1.0), (2.0, 1.0)], noise=1e-4)
     y = s.data.copy()

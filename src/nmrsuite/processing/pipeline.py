@@ -37,7 +37,10 @@ def default_recipe_1d(nmr: NMRData) -> list[dict[str, Any]]:
         except KeyError:
             name = None
         if name and nmr.direct.nucleus in SOLVENT_SHIFTS[name]:
-            steps.append({"step": "reference", "params": {"method": "solvent", "solvent": name}})
+            steps.append({
+                "step": "reference",
+                "params": {"method": "solvent", "solvent": name, "required": False},
+            })  # fmt: skip
     return steps
 
 

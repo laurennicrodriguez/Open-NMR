@@ -212,7 +212,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_mult.set_defaults(func=_cmd_multiplets)
 
     args = parser.parse_args(argv)
+    _ensure_unicode_output()
     return int(args.func(args))
+
+
+def _ensure_unicode_output() -> None:
+    """Reports use δ, ¹H, CDCl₃. A redirected or piped stdout on Windows defaults to a
+    legacy code page (cp1252) that cannot encode them; switch it to UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            "δ¹₃–".encode(stream.encoding or "ascii")
+        except (UnicodeEncodeError, LookupError):
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure:
+                reconfigure(encoding="utf-8")
 
 
 if __name__ == "__main__":
