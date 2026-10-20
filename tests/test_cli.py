@@ -17,6 +17,22 @@ def test_info_and_convert(make_bruker_1d, tmp_path, capsys) -> None:
     assert np.iscomplexobj(read_jcamp(target).data)
 
 
+def test_unicode_output_on_legacy_code_page(monkeypatch) -> None:
+    """Redirected stdout on Windows is cp1252, which cannot print δ, ¹H, CDCl₃."""
+    import io
+    import sys
+
+    from nmrsuite.cli import _ensure_unicode_output
+
+    raw = io.BytesIO()
+    fake = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", fake)
+    _ensure_unicode_output()
+    print("¹H NMR (500 MHz, CDCl₃) δ 7.26")
+    sys.stdout.flush()
+    assert "CDCl₃".encode() in raw.getvalue()
+
+
 def test_info_empty_folder(tmp_path) -> None:
     assert main(["info", str(tmp_path)]) == 1
 

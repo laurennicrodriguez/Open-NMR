@@ -293,6 +293,34 @@ def test_reference_xi_for_carbon() -> None:
     assert out.history[-1]["result"]["shift_ppm"] == pytest.approx(expected)
 
 
+def test_reference_13c_cd3cn_septet_far_off() -> None:
+    """Real case (LR-7-82-*): ¹³C in CD₃CN unreferenced by ~0.9 ppm. The CD₃ septet
+    (1:6:15:20:15:6:1, J(C,D) = 20.8 Hz) is found and its centre put at 1.32."""
+    from conftest import synth_spectrum
+    from nmrsuite.analysis.multiplet_firstorder import Coupling, stick_pattern
+
+    bf, off = 125.8, -0.95  # solvent appears 0.95 ppm too low
+    pos, amp = stick_pattern([Coupling(20.8, 6)])
+    pos -= pos.mean()
+    sept = [(1.32 + off + p / bf, 3.0 * a) for p, a in zip(pos, amp, strict=True)]
+    lines = [*sept, (118.26 + off, 0.5), (148.1 + off, 1.0), (127.3 + off, 1.0)]
+    s = synth_spectrum(lines, bf=bf, sw=30000.0, carrier_ppm=100.0, nucleus="13C",
+                       solvent="CD3CN", fwhm_hz=2.0, n=65536)  # fmt: skip
+    out = reference(s)
+    assert out.history[-1]["result"]["shift_ppm"] == pytest.approx(-off, abs=0.005)
+
+
+def test_reference_failure_is_optional() -> None:
+    s = spectrum([3.0])  # no CHCl3 residual anywhere near 7.26
+    s.params["acqus"] = {"SOLVENT": "CDCl3"}
+    with pytest.raises(ValueError):
+        reference(s)
+    with pytest.warns(UserWarning, match="not referenced"):
+        out = reference(s, required=False)
+    assert out.history[-1]["result"]["shift_ppm"] == 0.0
+    assert out.direct.offset_ppm == s.direct.offset_ppm
+
+
 def test_unknown_solvent_raises() -> None:
     s = spectrum([7.0])
     with pytest.raises(KeyError):

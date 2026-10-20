@@ -22,6 +22,7 @@ from nmrsuite.analysis.impurities import IMPURITIES_1H, IMPURITY_TOLERANCE_PPM
 from nmrsuite.data import NMRData
 from nmrsuite.processing.reference import (
     RESIDUAL_PATTERN_HZ,
+    SOLVENT_13C_PATTERN_HZ,
     SOLVENT_SHIFTS,
     canonical_solvent,
     solvent_of,
@@ -29,12 +30,6 @@ from nmrsuite.processing.reference import (
 from nmrsuite.processing.utils import refine_peak
 
 PeakKind = Literal["compound", "solvent", "impurity", "c13_satellite", "artifact"]
-
-#: Half-width (Hz) of each solvent's ¹³C multiplet (C–D coupling).
-SOLVENT_13C_PATTERN_HZ: dict[str, float] = {
-    "CDCl3": 33.0, "DMSO-d6": 64.0, "CD3OD": 65.0, "acetone-d6": 60.0, "C6D6": 25.0,
-    "CD3CN": 65.0, "CD2Cl2": 55.0, "THF-d8": 65.0, "toluene-d8": 60.0, "pyridine-d5": 25.0,
-}  # fmt: skip
 
 #: ¹J(C,H) range (Hz) for ¹³C satellites; satellites sit at ±J/2 from the parent.
 C13_SATELLITE_J_HZ = (110.0, 220.0)
@@ -185,9 +180,11 @@ def _mark_solvent(pl: PeakList) -> None:
     if pl.nucleus == "1H":
         half = RESIDUAL_PATTERN_HZ.get(pl.solvent, 0.0) + 2.0
     else:
-        half = SOLVENT_13C_PATTERN_HZ.get(pl.solvent, 30.0) + 3.0
+        half = SOLVENT_13C_PATTERN_HZ.get(pl.solvent, 30.0) + 6.0
     for p in pl.peaks:
-        if any(abs(p.ppm - s) * pl.obs_mhz <= half for s in shifts):
+        # a broad foot under the residual (shimming, exchange) also belongs to it
+        reach = half + max(0.0, p.width_hz - BROAD_HZ) / 2
+        if any(abs(p.ppm - s) * pl.obs_mhz <= reach for s in shifts):
             p.kind, p.note = "solvent", pl.solvent
 
 
