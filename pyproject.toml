@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nmrsuite"
+version = "0.1.0.dev0"
+description = "Open-source NMR processing and analysis, with quantum-mechanical multiplet fitting."
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Open-NMR contributors" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "nmrglue>=0.10",  # cross-checks only; never imported by the library
+]
+
+[project.scripts]
+nmrsuite = "nmrsuite.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nmrsuite"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "localdata: needs real Bruker data in NMRSUITE_LOCAL_DATA (skipped otherwise)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "NPY", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # δ, ν, ′ etc. are intentional in NMR text
