@@ -15,8 +15,34 @@ implementation brief: core library and multiplet engine first, test-first, GUI l
 | 1. Bruker reader (1D, 2D) with group-delay removal; JCAMP-DX import/export | **done** |
 | 2. 1D processing chain + replayable JSON history; `nmrsuite process` | **done** |
 | 3. Peak picking, integration, deconvolution; first-order multiplets, ACS report | **done** |
-| 4. Spin engine: Hamiltonian and exact simulation (AB/ABX validated) | next |
-| 5–9. Fitting, second-order routing, benchmark, joint fields, GUI | not started |
+| 4. Spin engine: Hamiltonian and exact simulation (AB/ABX validated) | **done** |
+| 5. Lineshape fitting with global search and uncertainties | next |
+| 6–9. Second-order routing, benchmark, joint fields, GUI | not started |
+
+### Spin engine (step 4)
+
+`nmrsuite.spin` simulates coupled spin-½ systems exactly:
+
+```python
+from nmrsuite.spin import SpinSystem, simulate, simulate_like, transitions
+
+abx = SpinSystem([3.02, 2.98, 7.0], {(0, 1): 16.0, (0, 2): 8.0, (1, 2): 3.0}, linewidths_hz=0.8)
+lines = transitions(abx, 500.0)  # frequencies, intensities, widths
+ppm, y = simulate(abx, 500.0, 7.2, 2.8)  # spectrum
+sim = simulate_like(abx, experimental)  # on an experimental spectrum's axis
+```
+
+- Hamiltonian built block by block (total F_z of the observed nucleus × heteronuclear
+  spin states), so up to 14 coupled ¹H are exact. Heteronuclei (¹⁹F, ³¹P, …) couple
+  through J·I_zI_z.
+- Intensities normalized so each observed spin contributes 1; per-spin line widths.
+- Validated against the analytic AB quartet and ABX (both parts), an independent
+  brute-force 2ᴺ Hamiltonian, intensity sum rules, ¹H–¹⁹F couplings and field dependence.
+
+Cost on the lab PC (one thread): 10 ¹H 0.1 s, 12 ¹H 1 s / 0.2 GB, 13 ¹H 7 s / 0.7 GB,
+14 ¹H 50 s / 2.6 GB. `estimated_memory_mb()` predicts this, and simulations over
+1.5 GB warn first. Fitting (step 5) works on multiplet regions, mostly ≤ 8 spins
+(< 0.05 s per simulation).
 
 ### Analysis and reports (step 3)
 

@@ -298,3 +298,23 @@ def test_simulation_speed(n, budget_s) -> None:
     ll = transitions(SpinSystem(shifts, js), SF)
     assert time.perf_counter() - t0 < budget_s
     assert ll.total == pytest.approx(n, rel=1e-3)
+
+
+def test_memory_estimate_and_warning(monkeypatch) -> None:
+    """Calibrated on the lab PC: 12 ¹H ≈ 185 MB, 14 ¹H ≈ 2.6 GB measured."""
+    import importlib
+
+    from nmrsuite.spin import estimated_memory_mb
+
+    # the package also exports a *function* named simulate, which shadows the module
+    sim = importlib.import_module("nmrsuite.spin.simulate")
+
+    assert estimated_memory_mb(SpinSystem([1.0] * 12)) == pytest.approx(185, rel=0.1)
+    assert estimated_memory_mb(SpinSystem([1.0] * 14)) == pytest.approx(2600, rel=0.1)
+    het = SpinSystem([1.0, 2.0, -110.0], nuclei=["1H", "1H", "19F"])
+    assert estimated_memory_mb(het) == pytest.approx(
+        2 * estimated_memory_mb(SpinSystem([1.0, 2.0]))
+    )
+    monkeypatch.setattr(sim, "MEMORY_WARNING_MB", 0.0)
+    with pytest.warns(ResourceWarning, match="exact simulation of 3 spins"):
+        transitions(SpinSystem([1.0, 1.1, 1.2], {(0, 1): 7.0}), SF)

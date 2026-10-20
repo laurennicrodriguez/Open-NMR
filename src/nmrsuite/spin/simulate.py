@@ -12,17 +12,25 @@ spins it involves, weighted by |⟨lower|I₋k|upper⟩|².
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, replace
 
 import numpy as np
 
 from nmrsuite.data import Dimension, NMRData
-from nmrsuite.spin.hamiltonian import SpinSystem, build_blocks, diagonalize
+from nmrsuite.spin.hamiltonian import (
+    SpinSystem,
+    build_blocks,
+    diagonalize,
+    estimated_memory_mb,
+)
 
 #: Lines weaker than this fraction of the strongest are dropped.
 MIN_RELATIVE_INTENSITY = 1e-6
 #: Above this many (lines × points) the lineshape is evaluated by binning + FFT.
 DIRECT_LIMIT = 2e7
+#: Simulations estimated to need more working memory than this (MB) raise a warning.
+MEMORY_WARNING_MB = 1500.0
 
 
 @dataclass
@@ -55,6 +63,14 @@ def transitions(
     min_relative: float = MIN_RELATIVE_INTENSITY,
 ) -> LineList:
     """All transitions of the observed nucleus at spectrometer frequency ``sf_mhz``."""
+    mb = estimated_memory_mb(system, observed)
+    if mb > MEMORY_WARNING_MB:
+        warnings.warn(
+            f"exact simulation of {system.n} spins needs ~{mb / 1000:.1f} GB and may take "
+            "minutes; consider splitting into weakly coupled fragments",
+            ResourceWarning,
+            stacklevel=2,
+        )
     blocks = build_blocks(system, sf_mhz, observed)
     diagonalize(blocks)
     obs = system.observed(observed)

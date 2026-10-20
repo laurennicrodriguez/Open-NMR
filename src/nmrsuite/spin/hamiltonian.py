@@ -169,6 +169,25 @@ def block_sizes(system: SpinSystem, observed: str = "1H") -> list[int]:
     return [comb(n_obs, k) for k in range(n_obs + 1) for _ in range(1 << n_het)]
 
 
+#: Bytes held per candidate transition while simulating (≈9 float64 working arrays).
+BYTES_PER_TRANSITION = 72
+
+
+def estimated_memory_mb(system: SpinSystem, observed: str = "1H") -> float:
+    """Peak working memory of :func:`~nmrsuite.spin.simulate.transitions`, in MB.
+
+    Every pair of neighbouring blocks (ΔM = −1) holds a dense n_lower × n_upper set of
+    candidate transitions. Measured on this machine: 12 ¹H ≈ 185 MB (1 s), 13 ≈ 690 MB
+    (7 s), 14 ≈ 2.6 GB (50 s, one thread); each extra spin costs ~3–4× more.
+    """
+    from math import comb
+
+    n_obs = len(system.observed(observed))
+    n_het = system.n - n_obs
+    pairs = sum(comb(n_obs, k) * comb(n_obs, k + 1) for k in range(n_obs))
+    return pairs * (1 << n_het) * BYTES_PER_TRANSITION / 1e6
+
+
 def spins_from(items: Iterable[tuple[float, str]]) -> SpinSystem:
     """Convenience: ``spins_from([(7.26, "1H"), (−110.0, "19F")])`` without couplings."""
     shifts, nuclei = zip(*items, strict=True)
