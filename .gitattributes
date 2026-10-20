@@ -1,1 +1,12 @@
 * text=auto eol=lf
+
+# Bruker binary data files (no extension)
+fid binary
+ser binary
+1r binary
+1i binary
+2rr binary
+2ri binary
+2ir binary
+2ii binary
+*.jdx text eol=lf

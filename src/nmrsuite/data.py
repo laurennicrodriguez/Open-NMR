@@ -49,6 +49,8 @@ class Dimension:
     acq_mode:
         Quadrature scheme for indirect dimensions (``"States"``, ``"echo-antiecho"``,
         ...) or the direct-dimension mode (``"DQD"``, ``"qsim"``, ``"qseq"``, ``"qf"``).
+
+    The ppm scale of a frequency axis is ``offset_ppm - i · sw_hz / obs_mhz / size``.
     """
 
     nucleus: str
@@ -61,6 +63,8 @@ class Dimension:
     carrier_ppm: float | None = None
     offset_ppm: float | None = None
     acq_mode: str | None = None
+    acquired: int | None = None
+    """Number of acquired points when the axis has been zero filled (else ``None``)."""
 
     @property
     def dwell_s(self) -> float:
@@ -105,6 +109,11 @@ class NMRData:
     group_delay: float = 0.0
     """Digital-filter group delay still present in the data, in complex points
     (0 once removed or for analog-filtered data)."""
+    vendor: str = ""
+    """Origin of the raw data (``"bruker"``, ...); selects vendor conventions such as
+    the quadrature sign used by the Fourier transform."""
+    history: list[dict[str, Any]] = field(default_factory=list)
+    """Processing steps applied to the raw data (see :mod:`nmrsuite.history`)."""
 
     def __post_init__(self) -> None:
         if self.data.ndim != len(self.dims):

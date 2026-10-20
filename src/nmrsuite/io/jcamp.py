@@ -418,6 +418,9 @@ def jcamp_to_nmrdata(parsed: dict[str, Any], source: Path | None = None) -> NMRD
         gd = 0.0
 
     pulprog = labels.get(".PULSESEQUENCE", "") or str(private.get("PULPROG", ""))
+    vendor = str(private.get("VENDOR", "")).lower()
+    if not vendor and "BRUKER" in labels.get("ORIGIN", "").upper():
+        vendor = "bruker"
     return NMRData(
         data=data,
         dims=[dim],
@@ -425,6 +428,7 @@ def jcamp_to_nmrdata(parsed: dict[str, Any], source: Path | None = None) -> NMRD
         source=source,
         experiment=detect_experiment({"PULPROG": pulprog, "NUC1": nucleus}),
         group_delay=gd,
+        vendor=vendor,
     )
 
 
@@ -507,6 +511,8 @@ def format_jcamp(
         head.append(f"##.SOLVENT NAME= {acq['SOLVENT']}")
     if acq.get("PULPROG"):
         head.append(f"##.PULSE SEQUENCE= {acq['PULPROG']}")
+    if nmr.vendor:
+        head.append(f"##$VENDOR= <{nmr.vendor}>")
     if dim.bf_mhz:
         head.append(f"##$BF1= {_fmt(dim.bf_mhz)}")
         if dim.carrier_ppm is not None:

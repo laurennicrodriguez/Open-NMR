@@ -1,0 +1,38 @@
+##TITLE= Audit trail, TopSpin 4.3.0
+##JCAMPDX= 5.01
+##ORIGIN= Bruker BioSpin GmbH
+##OWNER= nmrsu
+$$ /opt/examdata/123-31-9/1/pdata/1/auditp.txt
+##AUDIT TRAIL=  $$ (NUMBER, WHEN, WHO, WHERE, PROCESS, VERSION, WHAT)
+(   1,<2025-03-17T10:09:53.226-0500>,<nmrsu>,<csm-chem-nmr500>,<cprserver>,<TopSpin 4.3.0>,
+      <new/edc PROCNO=1>)
+(   2,<2025-03-17T10:12:53.043-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <Start of raw data processing
+       efp LB = 0.3 FT_mod = 6 PKNL = 1 PHC0 = 213.0715 PHC1 = 16.04283 SI = 64K 
+       data hash MD5: 64K
+       C7 AD 1A 15 54 41 CE 4C 37 B7 0D B8 72 8E 43 36>)
+(   3,<2025-03-17T10:12:53.076-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <Start of raw data processing
+       em LB = 0.3 SI = 64K 
+       data hash MD5: 64K
+       84 1C E3 33 3B 67 D6 BC 19 87 5D F0 98 38 2A 82>)
+(   4,<2025-03-17T10:12:53.113-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <apk 
+       data hash MD5: 64K
+       C0 21 53 CD 35 43 BE E7 55 BB 67 30 46 0A 15 EA>)
+(   5,<2025-03-17T10:12:53.148-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <ft FT_mod = 6 PKNL = 1 SI = 64K 
+       data hash MD5: 64K
+       C3 9C AD F2 EC 0B 93 6E 07 98 CE 02 BF 9E E4 23>)
+(   6,<2025-03-17T10:12:53.179-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <abs ABSG = 5 
+       data hash MD5: 64K
+       6B 57 C8 4F 4A 5A 57 FD 3F FE D1 59 A4 E2 12 48>)
+(   7,<2025-03-17T10:12:53.402-0500>,<nmrsu>,<csm-chem-nmr500>,<proc1d>,<TopSpin 4.3.0>,
+      <apk 
+       data hash MD5: 64K
+       47 D2 D8 0B AA 78 79 7F 5D 5B 3B B4 DD FA 46 1A>)
+##END=
+
+$$ hash MD5
+$$ FA A2 9D 9A 13 2B A3 C4 B5 7E B4 3C BA EB C9 88
