@@ -290,6 +290,7 @@ def read_bruker(path: str | Path) -> NMRData:
         source=folder,
         experiment=detect_experiment(acqus, acqu2s),
         group_delay=group_delay(acqus),
+        vendor="bruker",
     )
 
 
@@ -388,4 +389,5 @@ def read_bruker_processed(path: str | Path, procno: int = 1) -> NMRData:
         params=params,
         source=pdir,
         experiment=detect_experiment(acqus, acqu2s) if acqus else "unknown",
+        vendor="bruker",
     )

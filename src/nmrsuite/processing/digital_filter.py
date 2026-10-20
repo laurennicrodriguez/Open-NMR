@@ -17,6 +17,7 @@ from dataclasses import replace
 import numpy as np
 
 from nmrsuite.data import NMRData
+from nmrsuite.history import processing_step
 
 
 def shift_fid(fid: np.ndarray, points: float) -> np.ndarray:
@@ -27,6 +28,7 @@ def shift_fid(fid: np.ndarray, points: float) -> np.ndarray:
     return np.fft.ifft(np.fft.fft(fid, axis=-1) * ramp, axis=-1)
 
 
+@processing_step("remove_group_delay")
 def remove_group_delay(nmr: NMRData, truncate: bool = True) -> NMRData:
     """Return a copy of time-domain ``nmr`` with its group delay removed.
 

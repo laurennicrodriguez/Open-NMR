@@ -22,7 +22,8 @@ import pytest
 
 from nmrsuite.io import find_experiments, read_bruker, read_bruker_processed
 from nmrsuite.io.jcamp import read_jcamp, write_jcamp
-from nmrsuite.processing import remove_group_delay
+from nmrsuite.processing import process_1d, reference, remove_group_delay
+from nmrsuite.processing.phase import NEGATIVE_PEAK_EXPERIMENTS
 
 pytestmark = pytest.mark.localdata
 
@@ -109,6 +110,25 @@ def test_reproduces_topspin_1r(exp: Path) -> None:
     assert corr > 0.995, f"correlation with TopSpin 1r = {corr:.5f}"
     # same peak in the same place
     assert abs(int(np.argmax(ours)) - int(np.argmax(topspin))) <= 1
+
+
+@pytest.mark.parametrize("exp", ONE_D, ids=_ids(ONE_D))
+def test_default_chain_matches_topspin(exp: Path) -> None:
+    """Automatic processing vs TopSpin's final 1r, on TopSpin's reference."""
+    raw = read_bruker(exp)
+    ours = process_1d(raw)
+    ts = read_bruker_processed(exp)
+    bf = raw.direct.bf_mhz
+    ts_shift = -(ts.params["procs"]["SF"] - bf) / bf * 1e6
+    ref = next((h for h in ours.history if h["step"] == "reference"), None)
+    applied = ref["result"]["shift_ppm"] if ref else 0.0
+    aligned = reference(ours, method="offset", delta=ts_shift - applied)
+    y = np.interp(ts.direct.ppm_axis()[::-1], aligned.direct.ppm_axis()[::-1],
+                  aligned.data.real[::-1])[::-1]  # fmt: skip
+    corr = np.corrcoef(y, ts.data.real)[0, 1]
+    # negative-peak experiments: first-order phase is often underdetermined (README)
+    floor = 0.9 if raw.experiment in NEGATIVE_PEAK_EXPERIMENTS else 0.95
+    assert corr > floor, f"correlation with TopSpin 1r = {corr:.4f}"
 
 
 @pytest.mark.parametrize("exp", ONE_D[:3], ids=_ids(ONE_D[:3]))
