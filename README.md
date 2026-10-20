@@ -14,8 +14,44 @@ implementation brief: core library and multiplet engine first, test-first, GUI l
 | --- | --- |
 | 1. Bruker reader (1D, 2D) with group-delay removal; JCAMP-DX import/export | **done** |
 | 2. 1D processing chain + replayable JSON history; `nmrsuite process` | **done** |
-| 3. Peak picking, integration, deconvolution; first-order multiplets, ACS report | next |
-| 4–9. Spin engine, fitting, benchmark, GUI | not started |
+| 3. Peak picking, integration, deconvolution; first-order multiplets, ACS report | **done** |
+| 4. Spin engine: Hamiltonian and exact simulation (AB/ABX validated) | next |
+| 5–9. Fitting, second-order routing, benchmark, joint fields, GUI | not started |
+
+### Analysis and reports (step 3)
+
+`nmrsuite.analysis` and `nmrsuite.report`:
+
+- **Peak picking** with noise from signal-free regions, sub-point positions and widths;
+  **classification** as compound, solvent (each solvent's ¹H/¹³C pattern), impurity
+  (common solvents and grease by NMR solvent, after Fulmer et al.; water always),
+  ¹³C satellite (symmetric pairs at ±¹J(CH)/2) or artefact (spikes, broad humps).
+- **Integration**: automatic regions, slope/bias correction, normalization, summed or
+  deconvolution-based areas; CSV export.
+- **Deconvolution**: pseudo-Voigt region fits with local baseline (seeded by the picked
+  peaks or by hand) and whole-spectrum deconvolution; analytic areas.
+- **First-order multiplets**: lines are clustered, then the coupling tree (J values with
+  equivalent partners) that reproduces line positions *and* intensities is found and
+  refined by least squares; unexplained clusters are `m` with a range. J matching across
+  multiplets flags couplings without a partner. Manual `set_pattern`, `merge_multiplets`.
+- **Reports**: ACS (default), RSC, Wiley or a custom `Style`, e.g.
+  `¹H NMR (500 MHz, CDCl₃) δ 8.53 (d, J = 5.0 Hz, 1H), …, 1.24 (t, J = 7.8 Hz, 3H).`
+
+```bash
+nmrsuite multiplets "C:\data\HC-1-48\10"                      # report + tables
+nmrsuite multiplets "C:\data\HC-1-48\10" --normalize 3.78=3 --style RSC --plain
+```
+
+Simulated multiplets (d … ddt, 13 patterns) are recovered with J within ±0.1 Hz.
+
+**Known limitations**
+
+- Proton counts without a formula are a suggestion: an incomplete multiplet can halve
+  the scale. Use `--total-h` or `--normalize PPM=N` (Mnova also normalizes to a chosen
+  multiplet).
+- Second-order multiplets (AA′BB′, ABX, roofed AB) are not yet fitted; they come out as
+  `m` or with apparent splittings. This is what the spin engine (steps 4–6) is for.
+- ¹³C reports list shifts only; C–F/C–P doublets and DEPT editing labels come later.
 
 ### 1D processing (step 2)
 
@@ -104,9 +140,9 @@ from nmrsuite.processing import apodize, autophase, fft, phase, process_1d, zero
 raw = read_bruker(r"C:\data\HC-1-48\10")
 print(raw.experiment, raw.summary())
 
-spec = process_1d(raw)                       # automatic chain
-spec = phase(spec, p0=2.0, pivot_ppm=7.26)   # touch-up, also recorded
-save_recipe(spec.history, "recipe.json")     # replay(other_raw, load_recipe(...))
+spec = process_1d(raw)  # automatic chain
+spec = phase(spec, p0=2.0, pivot_ppm=7.26)  # touch-up, also recorded
+save_recipe(spec.history, "recipe.json")  # replay(other_raw, load_recipe(...))
 ppm, intensity = spec.direct.ppm_axis(), spec.data.real
 ```
 

@@ -47,6 +47,49 @@ def lorentzian_fid(
     return fid
 
 
+def synth_spectrum(
+    lines: list[tuple[float, float]],
+    *,
+    bf: float = 500.0,
+    sw: float = 6000.0,
+    carrier_ppm: float = 5.0,
+    n: int = 32768,
+    fwhm_hz: float = 0.6,
+    noise: float = 0.0,
+    solvent: str | None = None,
+    nucleus: str = "1H",
+    seed: int = 0,
+):
+    """A processed, perfectly phased 1D spectrum with Lorentzian lines [(ppm, area), ...].
+
+    Built in the time domain and transformed with the real pipeline (zero fill, FT).
+    """
+    from nmrsuite.data import Dimension, NMRData
+    from nmrsuite.processing import fft, zerofill
+
+    r2 = np.pi * fwhm_hz
+    peaks = [((ppm - carrier_ppm) * bf, amp) for ppm, amp in lines]
+    fid = lorentzian_fid(n, sw, peaks, r2=r2)
+    if noise:
+        rng = np.random.default_rng(seed)
+        fid = fid + noise * (rng.normal(size=n) + 1j * rng.normal(size=n))
+    dim = Dimension(nucleus, n, sw, bf, bf_mhz=bf, carrier_ppm=carrier_ppm)
+    params = {"acqus": {"SOLVENT": solvent}} if solvent else {}
+    nmr = NMRData(fid, [dim], params=params, vendor="bruker")
+    return fft(zerofill(nmr))
+
+
+def multiplet_lines(
+    centre_ppm: float, couplings: list[tuple[float, int]], n_h: float = 1.0, bf: float = 500.0
+) -> list[tuple[float, float]]:
+    """First-order stick lines (ppm, area) for a multiplet; total area = n_h."""
+    from nmrsuite.analysis.multiplet_firstorder import Coupling, stick_pattern
+
+    pos, amp = stick_pattern([Coupling(j, k) for j, k in couplings])
+    pos = pos - (pos[0] + pos[-1]) / 2
+    return [(centre_ppm + p / bf, n_h * a) for p, a in zip(pos, amp, strict=True)]
+
+
 def interleave(z: np.ndarray) -> np.ndarray:
     out = np.empty((*z.shape[:-1], 2 * z.shape[-1]))
     out[..., 0::2] = z.real

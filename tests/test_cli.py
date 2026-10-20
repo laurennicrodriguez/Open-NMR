@@ -38,6 +38,23 @@ def test_process_single_with_recipe_round_trip(tmp_path, capsys) -> None:
     assert "autophase" in capsys.readouterr().out
 
 
+def test_multiplets_command(tmp_path, capsys) -> None:
+    from realdata import DATASETS
+
+    exp = DATASETS["119-61-9"]  # benzophenone
+    peaks, integrals = tmp_path / "peaks.csv", tmp_path / "integrals.csv"
+    assert main(["multiplets", str(exp), "--peaks-csv", str(peaks),
+                 "--integrals-csv", str(integrals)]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    first = out.splitlines()[0]
+    assert first.startswith("¹H NMR (500 MHz, CDCl₃) δ 7.81 (")
+    assert "2H), 7.60 (" in first and "solvent" in out
+    assert peaks.read_text().startswith("ppm,") and integrals.read_text().startswith("ppm_from,")
+    assert main(["multiplets", str(exp), "--normalize", "7.60=2", "--plain", "--style", "RSC"]) == 0
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first.startswith("δH (500 MHz, CDCl3) 7.81 (4H,")
+
+
 def test_process_folder_to_out_dir(tmp_path) -> None:
     from realdata import DATA
 

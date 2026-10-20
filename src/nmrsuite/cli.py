@@ -1,5 +1,5 @@
-"""Command-line interface: ``nmrsuite info | convert | process`` (``multiplets`` and
-``benchmark`` follow in later build steps)."""
+"""Command-line interface: ``nmrsuite info | convert | process | multiplets``
+(``benchmark`` follows in a later build step)."""
 
 from __future__ import annotations
 
@@ -88,6 +88,53 @@ def _cmd_process(args: argparse.Namespace) -> int:
     return status
 
 
+def _parse_normalize(text: str | None) -> tuple[float, int] | None:
+    if not text:
+        return None
+    ppm, _, n = text.partition("=")
+    try:
+        return float(ppm), int(n)
+    except ValueError:
+        raise SystemExit(f"--normalize expects PPM=N, e.g. 3.89=3 (got {text!r})") from None
+
+
+def _cmd_multiplets(args: argparse.Namespace) -> int:
+    from nmrsuite.analysis import analyse_1d
+    from nmrsuite.report import get_style, proton_report
+
+    source = Path(args.source)
+    recipe = load_recipe(args.recipe) if args.recipe else None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        nmr = _process_one(source, recipe, exact=True)
+        a = analyse_1d(
+            nmr, style=args.style, total_h=args.total_h, normalize=_parse_normalize(args.normalize)
+        )
+    report = a.report
+    if args.plain and a.multiplets:
+        report = proton_report(nmr, a.multiplets, get_style(args.style), unicode=False)
+    print(report)
+    if a.multiplets:
+        print()
+        print(f"{'shift':>8}  {'mult':<6} {'J (Hz)':<22} {'nH':>3}  {'integral':>12}  flags")
+        for m in a.multiplets:
+            js = ", ".join(f"{j:.2f}" for j in m.js)
+            print(f"{m.ppm:8.3f}  {m.pattern:<6} {js:<22} {m.n_h or '-':>3}  "
+                  f"{m.integral:12.4g}  {' '.join(m.flags)}")  # fmt: skip
+        for i, j in a.unmatched_j:
+            print(f"    note: J = {j:.1f} Hz at {a.multiplets[i].ppm:.2f} ppm has no partner")
+    others = [p for p in a.peaks if p.kind != "compound"]
+    if others:
+        print()
+        for p in others:
+            print(f"    {p.ppm:7.3f}  {p.kind:<14} {p.note}")
+    if args.peaks_csv:
+        a.peaks.to_csv(args.peaks_csv)
+    if args.integrals_csv:
+        a.integrals.to_csv(args.integrals_csv)
+    return 0
+
+
 def _cmd_info(args: argparse.Namespace) -> int:
     root = Path(args.path)
     exps = [root] if (root / "acqus").is_file() else find_experiments(root)
@@ -148,6 +195,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="re-run automatic steps of a recipe instead of reusing "
                         "their recorded results")  # fmt: skip
     p_proc.set_defaults(func=_cmd_process)
+
+    p_mult = sub.add_parser(
+        "multiplets",
+        help="peaks, integrals, multiplets and a journal-format report for a 1D spectrum",
+    )
+    p_mult.add_argument("source", help="Bruker experiment folder (raw data)")
+    p_mult.add_argument("--recipe", help="processing recipe JSON (default: automatic chain)")
+    p_mult.add_argument("--style", default="ACS", help="ACS (default), RSC or Wiley")
+    p_mult.add_argument("--total-h", type=int, help="total protons (from the formula)")
+    p_mult.add_argument("--normalize", metavar="PPM=N",
+                        help="set the multiplet nearest PPM to N protons")  # fmt: skip
+    p_mult.add_argument("--plain", action="store_true", help="no Unicode super/subscripts")
+    p_mult.add_argument("--peaks-csv", help="write the peak table")
+    p_mult.add_argument("--integrals-csv", help="write the integral table")
+    p_mult.set_defaults(func=_cmd_multiplets)
 
     args = parser.parse_args(argv)
     return int(args.func(args))
