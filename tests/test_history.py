@@ -84,6 +84,20 @@ def test_default_recipe_contents() -> None:
     assert "reference" not in [r["step"] for r in default_recipe_1d(no_solvent)]
 
 
+def test_default_baseline_depends_on_the_nucleus() -> None:
+    def method(nmr: NMRData) -> str | None:
+        step = next(r for r in default_recipe_1d(nmr) if r["step"] == "baseline")
+        return step.get("params", {}).get("method")
+
+    assert method(raw_fid()) == "airpls"
+    carbon = raw_fid()
+    carbon.dims = [Dimension("13C", 4096, 5000.0, 125.0, bf_mhz=125.0, carrier_ppm=100.0)]
+    assert method(carbon) is None  # the step's own default, polynomial
+    negative = raw_fid()
+    negative.experiment = "DEPT-135"
+    assert method(negative) is None  # airPLS assumes positive peaks
+
+
 def test_registry_and_unknown_step() -> None:
     names = set(registered_steps())
     assert {"apodize", "fft", "phase", "autophase", "baseline", "reference"} <= names

@@ -153,18 +153,23 @@ input and records itself, with all parameters, in `nmr.history`
 | `zerofill` | to 2ⁿ, default ≥ 2 × TD |
 | `fft` | complex FT into display order, ppm axis from O1/BF1 |
 | `phase` / `autophase` | manual p0/p1 with pivot; automatic by peak symmetry + ACME entropy |
-| `baseline` | `poly` (default), `airpls`, `whittaker` (ALS), manual `points`; exclusion regions |
+| `baseline` | `poly`, `airpls`, `whittaker` (ALS), manual `points`; exclusion regions |
 | `reference` | residual solvent (Fulmer table), TMS, picked peak, offset, TopSpin's stored SR, Ξ ratios |
 | `crop`, `magnitude`, `power`, `reverse` | spectral utilities |
 
 `process_1d(raw)` runs the automatic chain: group delay → EM (LB 0.3 Hz ¹H, 1 Hz ¹³C) →
-zero fill → FT → autophase → polynomial baseline → solvent referencing. Data-dependent
+zero fill → FT → autophase → baseline (airPLS for ¹H, polynomial for ¹³C and for experiments
+with negative peaks) → solvent referencing. Data-dependent
 decisions (phase angles, reference shift) are recorded as results, so replaying a saved
 recipe reproduces the spectrum exactly; `--rerun` re-decides them on new data.
 
 On the group's 500 MHz data (15 1D sets: ¹H in CDCl₃/DMSO/MeOD, ¹³C, DEPT-135) the
 automatic chain matches TopSpin's final spectra with correlation ≥ 0.98 for 14 of 15
 and runs in 0.15–0.4 s per 64k-point spectrum (budget: 1 s).
+
+¹H uses airPLS because the polynomial removes real signal on crowded spectra: LR-6-60's 18
+aliphatic protons integrated to 10.8 H with it and 18.6 H with airPLS. Across 17 ¹H spectra
+airPLS matched TopSpin's final spectrum at least as well (correlation ≥ 0.990).
 
 **Known limitations**
 

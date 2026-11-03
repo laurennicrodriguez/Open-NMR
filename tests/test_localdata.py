@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from nmrsuite.analysis import integrate_region
 from nmrsuite.io import find_experiments, read_bruker, read_bruker_processed
 from nmrsuite.io.jcamp import read_jcamp, write_jcamp
 from nmrsuite.processing import process_1d, reference, remove_group_delay
@@ -129,6 +130,17 @@ def test_default_chain_matches_topspin(exp: Path) -> None:
     # negative-peak experiments: first-order phase is often underdetermined (README)
     floor = 0.9 if raw.experiment in NEGATIVE_PEAK_EXPERIMENTS else 0.95
     assert corr > floor, f"correlation with TopSpin 1r = {corr:.4f}"
+
+
+LOBELANE = [e for e in ONE_D if e.parent.name == "LR-6-60-LOBELANE" and e.name == "1"]
+
+
+@pytest.mark.parametrize("exp", LOBELANE, ids=_ids(LOBELANE))
+def test_baseline_keeps_crowded_aliphatic_signal(exp: Path) -> None:
+    """LR-6-60: 18 aliphatic protons, on the scale of its 4H aromatic signal."""
+    nmr = process_1d(read_bruker(exp))
+    per_h = integrate_region(nmr, 7.3775, 7.2775, slope_bias=False) / 4
+    assert integrate_region(nmr, 3.2, 0.9, slope_bias=False) / per_h == pytest.approx(18, abs=1.5)
 
 
 @pytest.mark.parametrize("exp", ONE_D[:3], ids=_ids(ONE_D[:3]))
