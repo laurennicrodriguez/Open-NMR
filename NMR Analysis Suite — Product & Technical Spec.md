@@ -4,7 +4,7 @@ Oct 19, 2026 · @Lauren
 
 ## Overview
 
-The goal is an open-source desktop NMR processing and analysis program that matches Mnova's everyday 1D/2D workflow first (Phase 1), then beats it on complex multiplet analysis (Phase 2) by fitting multiplets with a quantum-mechanical spin-system model instead of first-order pattern matching.
+The goal is an open-source NMR processing and analysis program, available as a desktop app and in the browser with data staying local, that matches Mnova's everyday 1D/2D workflow first (Phase 1), then beats it on complex multiplet analysis (Phase 2) by fitting multiplets with a quantum-mechanical spin-system model instead of first-order pattern matching.
 
 **Target users:** synthetic and physical organic chemists characterizing small molecules (roughly 100–1000 Da), writing SI, and running mechanistic or kinetic NMR studies.
 
@@ -184,7 +184,7 @@ After the multiplet engine, the highest-value additions are reproducibility, qua
 
 ## Architecture and tech stack
 
-Recommended: a Python processing core with a Qt desktop GUI, Windows-first and cross-platform, with the spin-simulation kernel compiled for speed.
+Recommended: a Python processing core with one web interface, packaged as a desktop app and also run in the browser with data staying local. Windows-first and cross-platform, with the spin-simulation kernel compiled for speed.
 
 **Layers**
 
@@ -199,12 +199,12 @@ Recommended: a Python processing core with a Qt desktop GUI, Windows-first and c
 | Language | Python 3.12+ | Fast to build; matches scientific ecosystem |
 | Numerics | NumPy, SciPy | FFT, linear algebra, optimization |
 | Vendor I/O | nmrglue as a starting point | Reads Bruker, Varian/Agilent, NMRPipe, Sparky; extend for JEOL and others |
-| Spin kernel | Numba first; C++ (pybind11) or Rust (PyO3) if needed | Eigen-decomposition of up to 2^14 states needs care with block-diagonalization by total Fz |
+| Spin kernel | Numba first; C++ (pybind11) or Rust (PyO3) if needed | Eigen-decomposition of up to 2^14 states needs care with block-diagonalization by total Fz. The browser version may need a WebAssembly build of the kernel, so check fit times there |
 | Fitting | SciPy least\_squares + custom global search; emcee or similar for Bayesian mode |  |
-| GUI | PySide6 (Qt 6) | LGPL; native-feeling on Windows |
-| Plotting | pyqtgraph or VisPy | Smooth zoom on 64k–1M-point spectra and 2D contours |
+| GUI | One web interface; framework chosen at step 9 | Built once and used by both the desktop and browser versions |
+| Plotting | WebGL | Smooth zoom on 64k–1M-point spectra and 2D contours; test on real spectra before committing to a library |
 | Chemistry | RDKit | Structure import, symmetry/equivalence, 3D conformers for Karplus estimates |
-| Packaging | PyInstaller or Briefcase | Single installer for Windows; macOS later |
+| Packaging | Desktop: web interface in a desktop shell with native Python. Browser: static site running the core through Pyodide/WebAssembly | Single installer for Windows; macOS later. The browser version needs no server, so spectra stay on the user's computer |
 
 **Design rules**
 
@@ -244,12 +244,12 @@ No calendar dates are set yet; each gate is the exit test for its milestone.
 
 **Decisions and open questions**
 
-- [x] Open source. License: BSD-3-Clause (compatible with NumPy, SciPy, nmrglue and RDKit; PySide6 is LGPL and used as a dynamic dependency).
+- [x] Open source. License: BSD-3-Clause (compatible with NumPy, SciPy, nmrglue and RDKit).
 - [x] Primary data: the department's Bruker 500 and 600 MHz spectrometers, so Bruker is the only P0 vendor reader.
 - [x] Test and benchmark data: the group's own spectra.
 - [x] Direct Mnova comparison: multiplet analysis only, with hand-drawn regions in Mnova; the new program is scored on the same regions and fully automatic.
 - [x] Built with Claude Code from this spec (see Implementation brief).
-- [ ] Desktop app (Python + Qt) or browser-based?
+- [x] Both desktop and browser: one web interface, starting with a desktop package and a browser version that runs locally, so spectra stay on the user's computer.
 - [ ] Can the benchmark raw data be published in the repository, or must it stay private (shared test data vs a local-only folder)?
 - [x] Mnova comparison baseline: version 14.2.3-29241 (x86_64). Record the version with every stored Mnova report.
 
@@ -270,7 +270,7 @@ nmr-suite/
     report/               # journal-format multiplet reports (ACS default)
     history.py            # processing recipe (JSON), replayable
     cli.py                # nmrsuite process | multiplets | benchmark
-  gui/                    # PySide6 app, built last
+  gui/                    # web interface for desktop and browser, built last
   tests/
     synthetic/            # generated spin systems with known δ/J
     data/                 # small committed Bruker test sets
@@ -290,7 +290,7 @@ nmr-suite/
 6. Automatic second-order detection (Δν/J < 10) that routes regions to the spin engine.
 7. Benchmark harness: CLI `nmrsuite benchmark` producing the head-to-head scoring table against stored Mnova reports, in same-regions and fully automatic modes.
 8. Joint 500 + 600 MHz fitting.
-9. GUI (PySide6 + pyqtgraph) over the finished core; then 2D processing.
+9. GUI: one web interface over the finished core, packaged for desktop and for local browser use; then 2D processing.
 
 **Conventions**
 
