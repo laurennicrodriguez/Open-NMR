@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from itertools import pairwise
 from math import comb
 
 import numpy as np
@@ -27,6 +28,7 @@ import numpy as np
 from nmrsuite.analysis.integrate import auto_proton_counts, auto_regions, integrate_region
 from nmrsuite.analysis.peaks import Peak, PeakList, pick_peaks
 from nmrsuite.data import NMRData
+from nmrsuite.processing.utils import ppm_to_index
 
 LETTERS = {1: "d", 2: "t", 3: "q", 4: "p", 5: "sext", 6: "sept", 7: "oct"}
 
@@ -45,6 +47,8 @@ MAX_PARTNERS_MIXED = 3
 MINOR_H = 0.5
 #: Integration window beyond the outer lines, in median line widths.
 INTEGRAL_PAD_FWHM = 12.0
+#: A split between multiplets above this fraction of the region's tallest point is not baseline.
+BASELINE_FRACTION = 0.01
 MAX_LINES = 32
 #: Acceptance limits for a first-order explanation.
 MAX_POSITION_ERROR = 1.5  # × tolerance
@@ -244,7 +248,8 @@ def _build(lines: list[Peak], tol: float, typical_width: float, obs_mhz: float) 
     hz = np.array([p.hz for p in lines])
     amp = np.array([p.intensity for p in lines])
     pattern, couplings, score = analyse_lines(hz, amp, tol)
-    half = max(p.width_hz for p in lines)
+    # median: a small line on the side of a taller one measures far too wide
+    half = float(np.median([p.width_hz for p in lines]))
     hi = (hz.max() + half) / obs_mhz
     lo = (hz.min() - half) / obs_mhz
     if pattern == "s":
@@ -343,19 +348,48 @@ def normalize_multiplets(mults: list[Multiplet], ppm: float, n_h: int) -> list[M
     return mults
 
 
+def _boundary_ppm(nmr: NMRData, upper: Multiplet, lower: Multiplet) -> float:
+    """Where to split two neighbouring multiplets: halfway between their ranges or, when
+    the ranges overlap, at the lowest point between their facing lines."""
+    middle = (upper.ppm_to + lower.ppm_from) / 2
+    if upper.ppm_to > lower.ppm_from:
+        return middle
+    d = nmr.direct
+    i0 = int(np.ceil(ppm_to_index(d, min(upper.lines_hz) / d.obs_mhz)))
+    i1 = int(np.floor(ppm_to_index(d, max(lower.lines_hz) / d.obs_mhz)))
+    if i1 <= i0:  # interleaved lines: no valley to find
+        return middle
+    k = i0 + int(np.argmin(np.real(nmr.data)[i0 : i1 + 1]))
+    return d.offset_ppm - k * d.sw_ppm / d.size
+
+
+def _boundary_on_signal(nmr: NMRData, ppm: float, hi: float, lo: float) -> bool:
+    """Whether a boundary inside hi–lo is above BASELINE_FRACTION of the tallest point."""
+    d = nmr.direct
+    y = np.abs(np.real(nmr.data))
+    i0, i1 = sorted(round(ppm_to_index(d, v)) for v in (hi, lo))
+    return bool(y[round(ppm_to_index(d, ppm))] > BASELINE_FRACTION * y[i0 : i1 + 1].max())
+
+
 def _integrate(nmr: NMRData, mults: list[Multiplet], typical: float) -> None:
     """Integrate each multiplet ±INTEGRAL_PAD_FWHM line widths beyond its outer lines
-    (Lorentzian tails hold real area), bounded halfway to the neighbours."""
+    (Lorentzian tails hold real area), bounded by the splits to its neighbours. A split
+    still on signal is not baseline, so that region gets no slope/bias correction."""
     obs = nmr.direct.obs_mhz
     pad = max(INTEGRAL_PAD_FWHM * typical, 3.0) / obs
+    splits = [_boundary_ppm(nmr, a, b) for a, b in pairwise(mults)]
     for i, m in enumerate(mults):  # sorted high → low ppm
         hi = m.ppm_from + pad
         lo = m.ppm_to - pad
-        if i > 0:
-            hi = min(hi, (mults[i - 1].ppm_to + m.ppm_from) / 2)
-        if i + 1 < len(mults):
-            lo = max(lo, (m.ppm_to + mults[i + 1].ppm_from) / 2)
-        m.integral = integrate_region(nmr, hi, lo)
+        used = []
+        if i > 0 and splits[i - 1] < hi:
+            hi = splits[i - 1]
+            used.append(hi)
+        if i + 1 < len(mults) and splits[i] > lo:
+            lo = splits[i]
+            used.append(lo)
+        on_signal = any(_boundary_on_signal(nmr, b, hi, lo) for b in used)
+        m.integral = integrate_region(nmr, hi, lo, slope_bias=not on_signal)
 
 
 # ---------------------------------------------------------------------------

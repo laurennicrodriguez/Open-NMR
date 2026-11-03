@@ -13,7 +13,15 @@ from nmrsuite.analysis import (
     merge_multiplets,
     set_pattern,
 )
-from nmrsuite.analysis.multiplet_firstorder import Coupling, stick_pattern
+from nmrsuite.analysis.integrate import integrate_region
+from nmrsuite.analysis.multiplet_firstorder import (
+    Coupling,
+    Multiplet,
+    _build,
+    _integrate,
+    stick_pattern,
+)
+from nmrsuite.analysis.peaks import Peak
 from nmrsuite.report import ACS, RSC, WILEY, custom_style, format_multiplet, proton_report
 
 CASES = [
@@ -62,6 +70,28 @@ def test_detect_multiplet_in_spectrum(pattern, couplings) -> None:
     assert m.js == pytest.approx([j for j, _ in couplings], abs=0.1)  # spec: ±0.1 Hz
     # the singlet at 7.5 ppm (3 H) and this multiplet (2 H)
     assert sorted(x.n_h for x in mults) == [2, 3]
+
+
+def test_small_line_on_a_shoulder_does_not_widen_the_range() -> None:
+    # LR-7-82-2: the small 7.7556 line measures 16.9 Hz wide on the side of a taller line
+    widths = {7.7556: 16.9, 7.7503: 1.8, 7.7371: 6.1, 7.7324: 1.6}
+    lines = [Peak(ppm, ppm * 500.0, 0.0, 1.0, w, 100.0) for ppm, w in widths.items()]
+    m = _build(lines, 0.5, 1.8, 500.0)
+    assert m.ppm_to > 7.7324 - 5.0 / 500.0
+    assert m.ppm_from < 7.7556 + 5.0 / 500.0
+
+
+def test_neighbouring_multiplets_split_at_the_valley() -> None:
+    # LR-7-82-2: ranges that overlap must not put the boundary on the side of a peak
+    upper = [(7.7556, 0.05), (7.7503, 0.43), (7.7371, 0.245), (7.7324, 1.0)]
+    lower = [(7.7094, 0.152), (7.7044, 0.933), (7.7001, 0.253), (7.6908, 0.158), (7.6865, 0.403)]
+    s = synth_spectrum([*upper, *lower], fwhm_hz=1.6, noise=1e-5)
+    a = Multiplet(7.744, 7.7894, 7.6986, [p * 500.0 for p, _ in upper], [x for _, x in upper])
+    b = Multiplet(7.698, 7.7235, 7.6724, [p * 500.0 for p, _ in lower], [x for _, x in lower])
+    _integrate(s, [a, b], 1.8)
+    full = integrate_region(s, 7.85, 7.60)
+    assert a.integral + b.integral == pytest.approx(full, rel=0.05)
+    assert a.integral / b.integral == pytest.approx(1.725 / 1.891, rel=0.1)
 
 
 def test_unresolvable_pattern_is_m() -> None:

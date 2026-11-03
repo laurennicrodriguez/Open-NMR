@@ -100,6 +100,7 @@ def _parse_normalize(text: str | None) -> tuple[float, int] | None:
 
 def _cmd_multiplets(args: argparse.Namespace) -> int:
     from nmrsuite.analysis import analyse_1d
+    from nmrsuite.analysis.multiplet_firstorder import MINOR_H
     from nmrsuite.report import get_style, proton_report
 
     source = Path(args.source)
@@ -123,6 +124,10 @@ def _cmd_multiplets(args: argparse.Namespace) -> int:
                   f"{m.integral:12.4g}  {' '.join(m.flags)}")  # fmt: skip
         for i, j in a.unmatched_j:
             print(f"    note: J = {j:.1f} Hz at {a.multiplets[i].ppm:.2f} ppm has no partner")
+        for m in a.multiplets:
+            if "minor" in m.flags:
+                print(f"    note: {m.ppm:.2f} ppm integrates below {MINOR_H} H; "
+                      "left out of the report")  # fmt: skip
     others = [p for p in a.peaks if p.kind != "compound"]
     if others:
         print()

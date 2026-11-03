@@ -153,6 +153,23 @@ def test_slope_bias_correction() -> None:
     assert integrate_region(tilted, 5.2, 4.8, slope_bias=False) > 1.2 * plain
 
 
+def test_slope_bias_skipped_when_an_edge_is_on_signal() -> None:
+    # the region's high edge sits on the side of a neighbouring line, not on baseline
+    s = synth_spectrum([(5.0, 1.0), (5.02, 1.0)], fwhm_hz=1.0)
+    edge = 5.02 - 1.5 / 500
+    plain = integrate_region(s, edge, 4.9, slope_bias=False)
+    assert integrate_region(s, edge, 4.9) == pytest.approx(plain, rel=0.01)
+
+
+def test_line_inside_a_compound_multiplet_is_not_an_impurity() -> None:
+    # LR-7-82-2: a line of a para-aryl ring at a pyridine shift, compound lines each side
+    lines = [(7.7503, 0.43), (7.7460, 0.05), (7.7371, 0.245), (7.7324, 1.0)]
+    pl = pick_peaks(synth_spectrum(lines, solvent="CD3CN", fwhm_hz=1.0, noise=1e-4))
+    p = min(pl, key=lambda p: abs(p.ppm - 7.7460))
+    assert abs(p.ppm - 7.7460) < 0.001
+    assert p.kind == "compound"
+
+
 def test_auto_regions_separate_signals() -> None:
     s = synth_spectrum([(7.0, 1.0), (7.01, 1.0), (3.0, 1.0)], noise=1e-4)
     regions = auto_regions(s)
