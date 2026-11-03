@@ -13,17 +13,14 @@ spins it involves, weighted by |⟨lower|I₋k|upper⟩|².
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 import numpy as np
 
 from nmrsuite.data import Dimension, NMRData
-from nmrsuite.spin.hamiltonian import (
-    SpinSystem,
-    build_blocks,
-    diagonalize,
-    estimated_memory_mb,
-)
+from nmrsuite.spin.hamiltonian import SpinKernel, SpinSystem, estimated_memory_mb
 
 #: Lines weaker than this fraction of the strongest are dropped.
 MIN_RELATIVE_INTENSITY = 1e-6
@@ -39,6 +36,11 @@ class LineList:
     intensity: np.ndarray
     width_hz: np.ndarray
     sf_mhz: float
+    #: Optional (with ``gradients=True``): ∂ν_line/∂θ for θ = (ν of each observed spin in
+    #: Hz, then each kernel coupling pair in Hz), exact by Hellmann–Feynman.
+    dfreq: np.ndarray | None = None
+    #: Optional: ∂w_line/∂w_k, the share of each observed spin in each line's width.
+    wweights: np.ndarray | None = None
 
     @property
     def ppm(self) -> np.ndarray:
@@ -53,7 +55,11 @@ class LineList:
 
     def sorted(self) -> LineList:
         o = np.argsort(self.freq_hz)
-        return LineList(self.freq_hz[o], self.intensity[o], self.width_hz[o], self.sf_mhz)
+        return LineList(
+            self.freq_hz[o], self.intensity[o], self.width_hz[o], self.sf_mhz,
+            None if self.dfreq is None else self.dfreq[o],
+            None if self.wweights is None else self.wweights[o],
+        )  # fmt: skip
 
 
 def transitions(
@@ -71,40 +77,97 @@ def transitions(
             ResourceWarning,
             stacklevel=2,
         )
-    blocks = build_blocks(system, sf_mhz, observed)
-    diagonalize(blocks)
-    obs = system.observed(observed)
-    widths = np.array(system.linewidths_hz)
-    norm = float(2 ** (system.n - 1))
-    freqs, ints, wids = [], [], []
-    for (m2, hb), up in blocks.items():
-        low = blocks.get((m2 - 2, hb))
-        if low is None:
-            continue
-        t_total = np.zeros((low.states.size, up.states.size))
+    kernel = kernel_for(system, observed)
+    nu = np.array(system.shifts_ppm) * sf_mhz
+    jv = np.array([system.j_matrix[a, b] for a, b in kernel.pairs])
+    return transitions_from(kernel, nu, jv, np.array(system.linewidths_hz), sf_mhz, min_relative)
+
+
+@lru_cache(maxsize=64)
+def _kernel(n: int, nuclei: tuple[str, ...], pairs: tuple, observed: str) -> SpinKernel:
+    return SpinKernel(n, nuclei, pairs, observed)
+
+
+def kernel_for(
+    system: SpinSystem, observed: str = "1H", pairs: Sequence[tuple[int, int]] | None = None
+) -> SpinKernel:
+    """Cached :class:`SpinKernel` for a system's topology (or an explicit pair list)."""
+    if pairs is None:
+        pairs = [
+            (a, b) for a in range(system.n) for b in range(a + 1, system.n) if system.j_matrix[a, b]
+        ]
+    key = tuple(sorted(tuple(sorted(p)) for p in pairs))
+    return _kernel(system.n, tuple(system.nuclei), key, observed)
+
+
+def transitions_from(
+    kernel: SpinKernel,
+    nu_hz: np.ndarray,
+    j_pairs: np.ndarray,
+    widths_hz: np.ndarray,
+    sf_mhz: float,
+    min_relative: float = MIN_RELATIVE_INTENSITY,
+    gradients: bool = False,
+) -> LineList:
+    """Transitions for given shifts (Hz, all spins), couplings (kernel pair order) and
+    per-spin widths, reusing the kernel's precomputed structure.
+
+    With ``gradients=True`` the line list also carries ∂ν/∂(ν_k, J_p) — by
+    Hellmann–Feynman, ∂E_i/∂θ = ⟨i|∂H/∂θ|i⟩, exact and nearly free given the
+    eigenvectors — and each line's width weights. Intensity derivatives are not
+    computed (they need eigenvector derivatives).
+    """
+    eig = kernel.evaluate(nu_hz, j_pairs)
+    widths = np.asarray(widths_hz, float)
+    norm = float(2 ** (kernel.n - 1))
+    obs_mean = widths[kernel.obs].mean()
+    egrad = _energy_gradients(kernel, eig) if gradients else None
+    freqs, ints, wids, dfs, wws = [], [], [], [], []
+    for low_key, up_key, per_k in kernel.links:
+        e_low, v_low = eig[low_key]
+        e_up, v_up = eig[up_key]
+        t_total = np.zeros((e_low.size, e_up.size))
         t_w = np.zeros_like(t_total)
         t_n = np.zeros_like(t_total)
-        for k in obs:
-            src = up.states[((up.states >> k) & 1) == 1]  # spin k is α in the upper state
-            dst = src ^ (1 << k)
-            iu = np.searchsorted(up.states, src)
-            il = np.searchsorted(low.states, dst)
-            tk = low.vectors[il].T @ up.vectors[iu]  # ⟨lower|I₋k|upper⟩
+        shares = []
+        for k, il, iu in per_k:
+            tk = v_low[il].T @ v_up[iu]  # ⟨lower|I₋k|upper⟩
             t_total += tk
-            tk2 = tk**2
+            tk2 = tk * tk
             t_w += tk2 * widths[k]
             t_n += tk2
-        inten = t_total**2 / norm
-        freq = up.energies[None, :] - low.energies[:, None]
-        width = np.where(t_n > 0, t_w / np.where(t_n > 0, t_n, 1.0), widths[obs].mean())
-        freqs.append(freq.ravel())
-        ints.append(inten.ravel())
-        wids.append(width.ravel())
+            shares.append(tk2)
+        freqs.append((e_up[None, :] - e_low[:, None]).ravel())
+        ints.append((t_total * t_total / norm).ravel())
+        safe = np.where(t_n > 0, t_n, 1.0)
+        wids.append(np.where(t_n > 0, t_w / safe, obs_mean).ravel())
+        if gradients:
+            g_low, g_up = egrad[low_key], egrad[up_key]  # (nθ, n_states)
+            df = g_up[:, None, :] - g_low[:, :, None]  # (nθ, n_low, n_up)
+            dfs.append(df.reshape(df.shape[0], -1).T)
+            ww = np.stack([s / safe for s in shares])  # (n_obs, n_low, n_up)
+            wws.append(ww.reshape(ww.shape[0], -1).T)
     f = np.concatenate(freqs)
     i = np.concatenate(ints)
     w = np.concatenate(wids)
     keep = i > min_relative * i.max()
-    return LineList(f[keep], i[keep], w[keep], sf_mhz).sorted()
+    dfreq = np.concatenate(dfs)[keep] if gradients else None
+    wweights = np.concatenate(wws)[keep] if gradients else None
+    return LineList(f[keep], i[keep], w[keep], sf_mhz, dfreq, wweights).sorted()
+
+
+def _energy_gradients(kernel: SpinKernel, eig: dict) -> dict:
+    """∂E/∂θ for every eigenstate of every block: θ = (ν_k of observed spins, J_p)."""
+    out = {}
+    for key, b in kernel.blocks.items():
+        _, v = eig[key]
+        w = v * v  # ⟨i|s⟩² per basis state s and eigenstate i
+        g_nu = b["mz_obs"] @ w  # (n_obs, n_eig)
+        g_j = b["zz"] @ w if b["zz"].size else np.zeros((0, v.shape[1]))
+        for p, rows, cols in b["flips"]:
+            g_j[p] += 0.5 * np.einsum("ri,ri->i", v[rows], v[cols])
+        out[key] = np.vstack([g_nu, g_j])
+    return out
 
 
 def lorentzian(
@@ -117,18 +180,61 @@ def lorentzian(
         method = "direct" if len(lines) * hz.size <= DIRECT_LIMIT else "binned"
     phi = np.deg2rad(phase_deg)
     if method == "direct":
-        out = np.zeros(hz.size, complex)
+        # Re[(hw + i·x)/(hw² + x²) · e^{iφ}] in real arithmetic (≈3× faster than complex)
+        c, s_ = np.cos(phi), np.sin(phi)
+        out = np.zeros(hz.size)
         chunk = max(1, int(DIRECT_LIMIT // max(hz.size, 1)) // 4)
         for s in range(0, len(lines), chunk):
             f = lines.freq_hz[s : s + chunk, None]
-            a = lines.intensity[s : s + chunk, None]
+            a = lines.intensity[s : s + chunk, None] / np.pi
             hw = lines.width_hz[s : s + chunk, None] / 2
             x = hz[None, :] - f
-            out += (a / np.pi * (hw + 1j * x) / (hw**2 + x**2)).sum(axis=0)
-        return (out * np.exp(1j * phi)).real
+            num = hw * c - x * s_ if s_ else hw
+            out += (a * num / (hw * hw + x * x)).sum(axis=0)
+        return out
     if method == "binned":
         return _binned(lines, hz, phi)
     raise ValueError(f"unknown method {method!r}")
+
+
+def lorentzian_jacobian(
+    lines: LineList,
+    hz: np.ndarray,
+    phase_deg: float,
+    coef_f: np.ndarray,
+    coef_w: np.ndarray,
+    chunk_elems: float = 4e6,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Spectrum S and its derivatives through line positions and widths.
+
+    ``coef_f`` (lines × nθ) holds intensity·∂ν/∂θ and ``coef_w`` intensity·∂w/∂θ; the
+    result is S (points), ∂S/∂θ (points × nθ) and ∂S/∂φ (points, per radian). Lines
+    are processed in chunks of at most ``chunk_elems`` line-points, so memory stays
+    small for large spin systems.
+    """
+    hz = np.asarray(hz, float)
+    c, s_ = np.cos(np.deg2rad(phase_deg)), np.sin(np.deg2rad(phase_deg))
+    n_t = coef_f.shape[1]
+    spec = np.zeros(hz.size)
+    jac = np.zeros((hz.size, n_t))
+    dphi = np.zeros(hz.size)
+    step = max(1, int(chunk_elems // max(hz.size, 1)))
+    for a in range(0, len(lines), step):
+        b = a + step
+        f = lines.freq_hz[a:b, None]
+        inten = lines.intensity[a:b]
+        hw = lines.width_hz[a:b, None] / 2
+        x = hz[None, :] - f
+        den = hw * hw + x * x
+        num = hw * c - x * s_
+        inv = 1.0 / (np.pi * den)
+        lin = num * inv  # unit-area Lorentzian (phased)
+        spec += inten @ lin
+        d_f = (s_ * den + 2 * x * num) * inv / den  # ∂L/∂ν
+        d_w = 0.5 * (c * den - 2 * hw * num) * inv / den  # ∂L/∂w
+        jac += d_f.T @ coef_f[a:b] + d_w.T @ coef_w[a:b]
+        dphi += inten @ ((-hw * s_ - x * c) * inv)
+    return spec, jac, dphi
 
 
 def _binned(lines: LineList, hz: np.ndarray, phi: float) -> np.ndarray:

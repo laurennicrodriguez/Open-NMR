@@ -107,9 +107,11 @@ Phase 1 analysis must reproduce Mnova's peak, integral, deconvolution and first-
 
 ### Multiplet analysis (first-order, parity level)
 
-- Automatic multiplet detection from picked peaks and integrals.
+- Automatic multiplet detection from picked peaks and integrals, rejecting artifacts close to the baseline rather than reporting them as multiplets.
+- Manual multiplet regions: the user draws a region by hand and the program analyzes that region. Available from the core library and CLI as explicit ppm limits, and by drawing in the GUI.
 - First-order classification: s, d, t, q, p, dd, dt, td, ddd, etc., with J values extracted from line spacings.
 - Manual editing: split/merge multiplets, change pattern, set J values, mark as "m" with range.
+- Default to analysis, not "m": when a region can be fitted, propose a pattern and J values rather than reporting a bare "m". The chemist makes the final call and can correct any proposal to "m" with range; that correction is recorded in the processing history.
 - Journal-format report generated live, e.g. *¹H NMR (500 MHz, CDCl₃) δ 7.26 (dd, J = 8.1, 1.4 Hz, 1H), …*, with configurable style templates (ACS, RSC, Wiley, custom) and decimal places.
 - J-matching across multiplets: flag coupling constants that should be shared between two protons.
 
@@ -212,7 +214,7 @@ Recommended: a Python processing core with a Qt desktop GUI, Windows-first and c
 
 ## Validation, testing and benchmarks
 
-The only direct comparison with Mnova is automatic multiplet analysis; processing is validated by its own unit and regression tests, not head-to-head. All test data come from the group's own Bruker 500 and 600 MHz spectra.
+The only direct comparison with Mnova is multiplet analysis; processing is validated by its own unit and regression tests, not head-to-head. All test data come from the group's own Bruker 500 and 600 MHz spectra.
 
 **Processing parity tests**
 
@@ -223,9 +225,9 @@ The only direct comparison with Mnova is automatic multiplet analysis; processin
 
 - **Synthetic:** simulated spectra with known δ/J, added noise and linewidth, across AB → ABX → AA′BB′ → 8-spin systems. Measures accuracy, convergence rate and false local minima.
 - **Experimental benchmark set:** about 20 of the group's compounds with hard multiplets — ortho-disubstituted aromatics (AA′BB′), vinyl groups (ABX), diastereotopic CH₂ in rings, fluorinated aromatics, overlapped aliphatic regions — each measured at both 500 and 600 MHz. Prioritize compounds whose Mnova multiplet reports have been wrong or needed manual correction.
-- **Reference values:** for each compound, an expert manual analysis cross-checked by consistency between the 500 and 600 MHz data (J must not change with field; second-order patterns must).
-- **Head-to-head (the one direct Mnova comparison):** on each benchmark compound, run Mnova's automatic multiplet analysis with default settings and the new program's automatic analysis with default settings; record multiplicity, δ and every J for both. Store the Mnova report text alongside the raw data.
-- **Scoring:** per multiplet — multiplicity correct (y/n), δ error (ppm), J error (Hz, mean and max), and whether the program flagged it as uncertain. Report a summary table per compound and per pattern type (AB, ABX, AA′BB′, overlap, long-range).
+- **Reference values:** for each compound, an expert manual analysis cross-checked by consistency between the 500 and 600 MHz data (J must not change with field; second-order patterns must). Compounds with data at one field only are scored as provisional: patterns and proton counts are checked against the expert analysis, and second-order J values are not treated as confirmed reference values until the second field is measured.
+- **Head-to-head (the one direct Mnova comparison):** on each benchmark compound, the Mnova baseline matches how a chemist actually uses it: auto phase and auto baseline correction, multiplet regions drawn by hand with the manual multiplet tool (automatic analysis picks up artifacts near the baseline), and no manual peak picking or multiplet merging. The new program runs in two modes: **same regions**, given the same ppm limits as Mnova, which tests the multiplet analysis alone; and **fully automatic**, with default settings and its own region detection, which also tests artifact rejection. Record multiplicity, δ and every J for Mnova and for both modes. Store three reports per compound alongside the raw data and region limits, all with auto phase, auto baseline and the solvent peak set by hand: the chemist's expert analysis, Mnova with hand-drawn regions, and Mnova fully automatic. New same-regions results are compared with the hand-drawn Mnova report, and fully automatic results with the fully automatic Mnova report. Before δ is scored, both programs are referenced to the residual solvent peak, because uncorrected spectra can differ by about 0.1 ppm (LR-7-82-2 opened with CD₃CN near 2.04 ppm before it was set to 1.94).
+- **Scoring:** per multiplet — multiplicity correct (y/n), δ error (ppm), J error (Hz, mean and max), and whether the program flagged it as uncertain. Fully automatic mode also counts false regions (artifacts reported as multiplets) and missed regions against the hand-drawn set. Report a summary table per compound and per pattern type (AB, ABX, AA′BB′, overlap, long-range), with each mode shown separately.
 
 **Engineering tests**
 
@@ -245,11 +247,11 @@ No calendar dates are set yet; each gate is the exit test for its milestone.
 - [x] Open source. License: BSD-3-Clause (compatible with NumPy, SciPy, nmrglue and RDKit; PySide6 is LGPL and used as a dynamic dependency).
 - [x] Primary data: the department's Bruker 500 and 600 MHz spectrometers, so Bruker is the only P0 vendor reader.
 - [x] Test and benchmark data: the group's own spectra.
-- [x] Direct Mnova comparison: automatic multiplet analysis only.
+- [x] Direct Mnova comparison: multiplet analysis only, with hand-drawn regions in Mnova; the new program is scored on the same regions and fully automatic.
 - [x] Built with Claude Code from this spec (see Implementation brief).
 - [ ] Desktop app (Python + Qt) or browser-based?
 - [ ] Can the benchmark raw data be published in the repository, or must it stay private (shared test data vs a local-only folder)?
-- [ ] Which Mnova version is the comparison baseline? Record it with every stored Mnova report.
+- [x] Mnova comparison baseline: version 14.2.3-29241 (x86_64). Record the version with every stored Mnova report.
 
 ## Implementation brief for Claude Code
 
@@ -273,7 +275,8 @@ nmr-suite/
     synthetic/            # generated spin systems with known δ/J
     data/                 # small committed Bruker test sets
   benchmark/
-    compounds/<id>/       # raw 500 + 600 MHz data, reference.json, mnova_report.txt
+    compounds/<id>/       # raw 500 + 600 MHz data, reference.json, regions.json,
+                          # expert_report.txt, mnova_manual_report.txt, mnova_auto_report.txt
     run_benchmark.py      # scores both programs, writes results table
 ```
 
@@ -285,7 +288,7 @@ nmr-suite/
 4. Spin engine: Hamiltonian builder and exact simulation, validated against analytic AB and ABX solutions.
 5. Lineshape fitting with global search and uncertainties; synthetic test suite.
 6. Automatic second-order detection (Δν/J < 10) that routes regions to the spin engine.
-7. Benchmark harness: CLI `nmrsuite benchmark` producing the head-to-head scoring table against stored Mnova reports.
+7. Benchmark harness: CLI `nmrsuite benchmark` producing the head-to-head scoring table against stored Mnova reports, in same-regions and fully automatic modes.
 8. Joint 500 + 600 MHz fitting.
 9. GUI (PySide6 + pyqtgraph) over the finished core; then 2D processing.
 
@@ -299,5 +302,5 @@ nmr-suite/
 **Definition of done for the multiplet engine**
 
 - All synthetic tests pass (J within ±0.05 Hz on noise-free data).
-- On the benchmark set, the summary table shows fewer multiplicity errors and lower mean J error than Mnova's automatic analysis, with J within ±0.1 Hz of reference for systems up to 8 coupled protons.
+- On the benchmark set, same-regions mode shows fewer multiplicity errors and lower mean J error than Mnova with the same hand-drawn regions, with J within ±0.1 Hz of reference for systems up to 8 coupled protons. Fully automatic results, including false and missed regions, are reported alongside.
 - Every second-order region is either fitted or explicitly flagged; none is reported with first-order J values silently.

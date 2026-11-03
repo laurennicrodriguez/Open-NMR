@@ -16,8 +16,66 @@ implementation brief: core library and multiplet engine first, test-first, GUI l
 | 2. 1D processing chain + replayable JSON history; `nmrsuite process` | **done** |
 | 3. Peak picking, integration, deconvolution; first-order multiplets, ACS report | **done** |
 | 4. Spin engine: Hamiltonian and exact simulation (AB/ABX validated) | **done** |
-| 5. Lineshape fitting with global search and uncertainties | next |
-| 6–9. Second-order routing, benchmark, joint fields, GUI | not started |
+| 5. Lineshape fitting with global search and uncertainties | **done** |
+| 6. Automatic second-order detection (Δν/J < 10) routing regions to the fit | next |
+| 7–9. Benchmark harness vs Mnova, joint 500 + 600 MHz fits, GUI | not started |
+
+### Lineshape fitting (step 5)
+
+`nmrsuite.spin.fit_spin_region` fits a spin system to a spectral region. Shifts,
+couplings and widths are numbers (fixed) or names (fitted); a shared name ties values,
+which is how symmetry is written:
+
+```python
+from nmrsuite.spin import SpinModel, fit_spin_region
+
+para = SpinModel(  # para-disubstituted benzene, AA'BB'
+    shifts=["dA", "dB", "dB", "dA"],
+    couplings={
+        (0, 1): "Jo",
+        (3, 2): "Jo",
+        (0, 2): "Jp",
+        (3, 1): "Jp",
+        (0, 3): "Jm_a",
+        (1, 2): "Jm_b",
+    },
+    linewidths="w",
+)
+start = {"dA": 7.745, "dB": 7.705, "Jo": 8.8, "Jp": 0.3, "Jm_a": 2.5, "Jm_b": 2.5, "w": 0.8}
+fit = fit_spin_region(spectrum, 7.85, 7.60, para, start)
+print(fit.table(500.3))  # values ± standard errors
+```
+
+- Bounded least squares on δ, J, widths and a residual phase; intensity scale and a
+  linear baseline are solved exactly at each step (variable projection).
+- Analytic Jacobian: line positions by Hellmann–Feynman, lineshape derivatives in closed
+  form (intensity derivatives omitted while iterating; an exact numerical Jacobian at the
+  minimum gives the standard errors).
+- Multi-start global search (J ±30 %, small couplings sign-flipped), stopping early when
+  two starts agree; stuck starts are abandoned.
+- A ×2 zero-filled spectrum is fitted on every 2nd point, so residuals are independent.
+
+Synthetic tests (AB, ABX, AA′BB′, AA′BB′C pyridinium, an 8-spin alkyl chain) recover
+J within ±0.1 Hz and δ within ±0.001 ppm from deliberately wrong starts, and J within
+±0.05 Hz on noise-free data (the spec's acceptance values).
+
+On real data (LR-7-82-2, 500 MHz, CD₃CN) the pyridinium ring fits as AA′BB′C to 4.6 %
+of the tallest line, giving δ 8.893 / 8.198 / 8.695 and J₂₃ 6.20, J₃₄ 7.89, J₂₄ 1.29,
+J₃₅ 1.35, J₂₆ 1.42, J₂₅ 0.75 Hz; the para-aryl ring fits as AA′BB′ (J_o 8.65, J_p 0.45 Hz).
+With regions drawn by hand, Mnova resolves only the para-H (tt, J = 7.9, 1.4 Hz) and reports
+the other four signals as "m". A hand first-order reading of the line spacings gives 5.6, 7.1
+and 7.9 Hz for the ortho couplings: H3's 7.1 Hz t is the average of J₂₃ and J₃₄, not a coupling.
+
+**Known limitations**
+
+- AA′BB′ spectra are identical under J_AA′ ↔ J_BB′ and J_AB ↔ J_AB′; the fit cannot (and
+  no program can) tell these apart. Chemistry assigns them.
+- Speed: a realistic 8-spin region (10 parameters) takes ~6.5 s on the lab PC, one
+  thread (spec: < 5 s on a typical laptop). A fully asymmetric 8-spin system with 25
+  free parameters is slow (~1 min per start) and needs good starting values; splitting
+  into weakly coupled fragments is planned.
+- Standard errors describe the fit to this spectrum; with very high S/N they are tiny
+  and systematic lineshape errors dominate.
 
 ### Spin engine (step 4)
 

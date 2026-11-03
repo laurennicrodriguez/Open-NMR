@@ -318,3 +318,51 @@ def test_memory_estimate_and_warning(monkeypatch) -> None:
     monkeypatch.setattr(sim, "MEMORY_WARNING_MB", 0.0)
     with pytest.warns(ResourceWarning, match="exact simulation of 3 spins"):
         transitions(SpinSystem([1.0, 1.1, 1.2], {(0, 1): 7.0}), SF)
+
+
+def test_line_frequency_gradients_match_finite_differences() -> None:
+    """Hellmann–Feynman ∂ν/∂(ν_k, J_p) against central differences (non-degenerate
+    strongly coupled system, so line order is stable under small steps)."""
+    from nmrsuite.spin.simulate import kernel_for, transitions_from
+
+    sys_ = SpinSystem([3.00, 3.031, 3.072], {(0, 1): 15.3, (0, 2): 4.1, (1, 2): 7.7},
+                      linewidths_hz=[0.8, 1.1, 1.4])  # fmt: skip
+    kern = kernel_for(sys_)
+    nu = np.array(sys_.shifts_ppm) * SF
+    jv = np.array([sys_.j_matrix[a, b] for a, b in kern.pairs])
+    w = np.array(sys_.linewidths_hz)
+    base = transitions_from(kern, nu, jv, w, SF, min_relative=0.0, gradients=True)
+    h = 1e-4
+    theta = np.concatenate([nu, jv])
+    for t in range(theta.size):
+        up, dn = theta.copy(), theta.copy()
+        up[t] += h
+        dn[t] -= h
+        f_up = transitions_from(kern, up[:3], up[3:], w, SF, min_relative=0.0).freq_hz
+        f_dn = transitions_from(kern, dn[:3], dn[3:], w, SF, min_relative=0.0).freq_hz
+        np.testing.assert_allclose(base.dfreq[:, t], (f_up - f_dn) / (2 * h), atol=1e-6)
+    # width shares sum to 1 for every line
+    np.testing.assert_allclose(base.wweights.sum(axis=1), 1.0, atol=1e-12)
+
+
+def test_lorentzian_jacobian_matches_finite_differences() -> None:
+    from nmrsuite.spin.simulate import lorentzian_jacobian
+
+    f = np.array([1500.0, 1507.3, 1512.1])
+    ll = LineList(f, np.array([1.0, 0.6, 0.3]), np.array([0.9, 1.3, 0.7]), SF)
+    hz = np.linspace(1520, 1490, 3001)
+    phase = 7.0
+    # θ = (shift of all lines together, width of all lines together)
+    cf = np.column_stack([ll.intensity, np.zeros(3)])
+    cw = np.column_stack([np.zeros(3), ll.intensity])
+    spec, jac, dphi = lorentzian_jacobian(ll, hz, phase, cf, cw, chunk_elems=2000)
+    np.testing.assert_allclose(spec, lorentzian(ll, hz, phase), atol=1e-12)
+    h = 1e-5
+
+    def shifted(df=0.0, dw=0.0, dp=0.0):
+        return lorentzian(LineList(f + df, ll.intensity, ll.width_hz + dw, SF), hz, phase + dp)
+
+    np.testing.assert_allclose(jac[:, 0], (shifted(df=h) - shifted(df=-h)) / (2 * h), atol=1e-6)
+    np.testing.assert_allclose(jac[:, 1], (shifted(dw=h) - shifted(dw=-h)) / (2 * h), atol=1e-6)
+    dp = np.rad2deg(h)
+    np.testing.assert_allclose(dphi, (shifted(dp=dp) - shifted(dp=-dp)) / (2 * h), atol=1e-6)
