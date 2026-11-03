@@ -94,6 +94,40 @@ def test_neighbouring_multiplets_split_at_the_valley() -> None:
     assert a.integral / b.integral == pytest.approx(1.725 / 1.891, rel=0.1)
 
 
+def test_uneven_quartet_is_not_read_as_an_alias() -> None:
+    """Real case (2-ethylpyridine CH2): spacings 8.0, 7.7, 7.2 Hz, lines 3 Hz wide. Two
+    near-equal couplings ("td") would fit, and their refinement ran off to 16.9, 9.8 Hz."""
+    hz = [1388.66, 1380.62, 1372.90, 1365.67]
+    pattern, couplings, _ = analyse_lines(hz, [2.82, 7.33, 8.43, 4.01], tol=1.8)
+    assert pattern == "q"
+    assert couplings[0].j_hz == pytest.approx(7.66, abs=0.05)
+
+
+def test_broad_lines_do_not_merge_a_resolved_small_coupling() -> None:
+    """Real case (2-ethylpyridine H4): lines 3.6 Hz wide but a 1.85 Hz coupling resolved."""
+    from nmrsuite.analysis.multiplet_firstorder import _build
+    from nmrsuite.analysis.peaks import Peak
+
+    hz = [3700.0, 3701.85, 3707.6, 3709.5, 3715.3, 3717.15]
+    amp = [1.0, 1.0, 2.0, 2.0, 1.0, 1.0]
+    lines = [Peak(f / 500.0, f, 0.0, a, 3.6, 100.0) for f, a in zip(hz, amp, strict=True)]
+    m = _build(lines, tol=2.1, typical_width=3.6, obs_mhz=500.0)
+    assert m.pattern == "td"
+    assert m.js == pytest.approx([7.65, 1.85], abs=0.1)
+
+
+def test_tiny_signals_do_not_set_the_proton_scale() -> None:
+    """Real case: with a correct baseline, dozens of tiny peaks have small positive areas;
+    they must neither become the "1H" reference nor reach the report."""
+    lines = [*multiplet_lines(8.9, [(6.0, 1)], 2.0), *multiplet_lines(8.2, [(7.0, 2)], 2.0),
+             (7.7, 4.0), (5.5, 1.0)]  # fmt: skip
+    tiny = [(1.0 + 0.1 * k, 0.0015) for k in range(30)]
+    mults = detect_multiplets(synth_spectrum(lines + tiny, fwhm_hz=0.6, noise=2e-5))
+    assert [(round(m.ppm, 1), m.n_h) for m in mults if m.n_h] == [
+        (8.9, 2), (8.2, 2), (7.7, 4), (5.5, 1)
+    ]  # fmt: skip
+
+
 def test_unresolvable_pattern_is_m() -> None:
     # second-order-like cluster: lines without a first-order explanation
     lines = [(3.0, 1.0), (3.0 + 3.0 / 500, 0.2), (3.0 + 4.1 / 500, 0.9), (3.0 + 9.5 / 500, 0.4)]

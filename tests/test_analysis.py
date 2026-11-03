@@ -97,6 +97,33 @@ def test_water_in_cd3cn_and_broad_solvent_foot() -> None:
     assert all(p.kind == "solvent" for p in pl if 1.88 < p.ppm < 1.98)
 
 
+def test_small_peaks_on_the_solvent_foot_are_solvent() -> None:
+    """Real case (LR-7-82-2): 1 % features 10 Hz from the CD3CN quintet are not signals."""
+    j = 2.5 / 500
+    quintet = [(1.94 + k * j, a) for k, a in zip((-2, -1, 0, 1, 2), (1, 2, 3, 2, 1), strict=True)]
+    lines = [*quintet, (1.94 + 10.0 / 500, 0.03), (1.94 - 12.0 / 500, 0.03), (7.7, 4.0)]
+    pl = pick_peaks(synth_spectrum(lines, solvent="CD3CN", noise=1e-4))
+    assert all(p.kind == "solvent" for p in pl if 1.9 < p.ppm < 1.98)
+    assert [p.kind for p in pl if p.ppm > 7] == ["compound"]
+
+
+def test_small_humps_on_a_tail_are_artifacts_but_broad_signals_stay() -> None:
+    """Many humps inflate the median width, so the strong lines must set the scale."""
+    s = synth_spectrum([(6.0, 1.0), (5.0, 1.0), (4.0, 1.0)], fwhm_hz=1.0, noise=1e-5)
+    ppm = s.direct.ppm_axis()
+    tall = s.data.real.max()
+
+    def bump(centre: float, height: float, fwhm_hz: float) -> np.ndarray:
+        return height * tall * np.exp(-(((ppm - centre) * 500) ** 2) / (2 * (fwhm_hz / 2.355) ** 2))
+
+    humps = sum(bump(c, 0.006, 50.0) for c in (2.0, 2.5, 3.0, 3.5, 1.5))
+    nh = bump(8.0, 0.05, 40.0)  # a real broad NH
+    pl = pick_peaks(s.copy_with(data=s.data + humps + nh))
+    kinds = {round(p.ppm, 1): p.kind for p in pl}
+    assert all(kinds[c] == "artifact" for c in (2.0, 2.5, 3.0, 3.5, 1.5))
+    assert kinds[8.0] == "compound"
+
+
 def test_classification_artifacts() -> None:
     s = synth_spectrum([(6.0, 1.0), (5.0, 1.0), (4.0, 1.0), (3.0, 1.0), (2.0, 1.0)], noise=1e-4)
     y = s.data.copy()
@@ -185,6 +212,8 @@ def test_auto_regions_separate_signals() -> None:
         ([6.1, 3.9, 2.05, 1.0], None, [6, 4, 2, 1]),
         ([2.0, 2.0, 3.0], None, [2, 2, 3]),  # not [1, 1, 1.5]
         ([5.0, 2.0, 3.0], None, [5, 2, 3]),  # not [2, 1, 1]
+        # two tiny fragments (real case: vismodegib) must not become the 1H reference
+        ([4.0, 4.0, 4.0, 8.0, 8.0, 4.0, 4.0, 4.0, 1.0, 1.0], None, [1, 1, 1, 2, 2, 1, 1, 1, 1, 1]),
         ([1.0, 1.0, 1.0], 9, [3, 3, 3]),
     ],
 )

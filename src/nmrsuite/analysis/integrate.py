@@ -196,14 +196,20 @@ def auto_proton_counts(
         for n in (1, 2, 3, 4):
             scale = ak / n
             v = a / scale
-            # every region must be worth at least ~1 H (no rounding 0.5 H up to 1 H)
-            if v.max() > max_per_region + 0.5 or v.min() < 0.75:
+            if v.max() > max_per_region + 0.5:
                 continue
+            # Every region must be worth at least ~1 H (no rounding 0.5 H up to 1 H),
+            # except a few very small fragments, which then do not count at all.
+            small = v < 0.75
+            shares = a[small] / a.sum()
+            if shares.size and (shares.max() > FRAGMENT_SHARE or shares.sum() > 2 * FRAGMENT_SHARE):
+                continue
+            kept = ~small
             r = np.maximum(1, np.round(v))
             # area-weighted mean relative deviation: |Δ|/n, so shrinking the scale
             # (which shrinks absolute deviations) earns nothing
-            err = float(np.sum(a * np.abs(v - r) / r) / a.sum())
-            trials.append((err, int(r.sum()), float(scale), [int(x) for x in r]))
+            err = float(np.sum((a * np.abs(v - r) / r)[kept]) / a[kept].sum())
+            trials.append((err, int(r[kept].sum()), float(scale), [int(x) for x in r]))
     if not trials:
         scale = float(a.min())
         return scale, [max(1, round(v)) for v in a / scale]
@@ -215,3 +221,6 @@ def auto_proton_counts(
 
 #: Weighted mean relative rounding error within which a smaller total count is preferred.
 SCALE_TOLERANCE = 0.03
+#: A region may fall below 1 H, as a fragment, if it holds at most this share of the
+#: total area (and all such regions at most twice this).
+FRAGMENT_SHARE = 0.03

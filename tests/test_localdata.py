@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nmrsuite.analysis import integrate_region
+from nmrsuite.analysis import analyse_1d, integrate_region
 from nmrsuite.io import find_experiments, read_bruker, read_bruker_processed
 from nmrsuite.io.jcamp import read_jcamp, write_jcamp
 from nmrsuite.processing import process_1d, reference, remove_group_delay
@@ -137,10 +137,33 @@ LOBELANE = [e for e in ONE_D if e.parent.name == "LR-6-60-LOBELANE" and e.name =
 
 @pytest.mark.parametrize("exp", LOBELANE, ids=_ids(LOBELANE))
 def test_baseline_keeps_crowded_aliphatic_signal(exp: Path) -> None:
-    """LR-6-60: 18 aliphatic protons, on the scale of its 4H aromatic signal."""
+    """LR-6-60: 18 aliphatic protons against all 10 aromatic ones (a window that wide does
+    not depend on how the buried CHCl3 line is assigned)."""
     nmr = process_1d(read_bruker(exp))
-    per_h = integrate_region(nmr, 7.3775, 7.2775, slope_bias=False) / 4
+    per_h = integrate_region(nmr, 7.45, 7.05, slope_bias=False) / 10
     assert integrate_region(nmr, 3.2, 0.9, slope_bias=False) / per_h == pytest.approx(18, abs=1.5)
+
+
+def _named(folder: str) -> list[Path]:
+    return [e for e in ONE_D if e.parent.name == folder and e.name == "1"]
+
+
+@pytest.mark.parametrize("exp", _named("2-EtPyridine QA"), ids=lambda e: e.parent.name)
+def test_ethylpyridine_report(exp: Path) -> None:
+    """CHCl3 (not a ¹³C satellite nearer 7.26) sets the scale; whole-proton counts."""
+    a = analyse_1d(process_1d(read_bruker(exp)))
+    assert a.multiplets[0].ppm == pytest.approx(8.53, abs=0.01)
+    reported = [m for m in a.multiplets if m.n_h]
+    assert [m.n_h for m in reported] == [1, 1, 1, 1, 2, 3]
+    assert reported[-2].pattern == "q" and reported[-1].pattern == "t"
+
+
+@pytest.mark.parametrize("exp", _named("LR-7-82-2"), ids=lambda e: e.parent.name)
+def test_pyridinium_report_has_no_solvent_entries(exp: Path) -> None:
+    a = analyse_1d(process_1d(read_bruker(exp)))
+    reported = [m for m in a.multiplets if m.n_h and "minor" not in m.flags]
+    assert [m.n_h for m in reported] == [2, 1, 2, 4]
+    assert all(m.ppm > 7 for m in reported)
 
 
 @pytest.mark.parametrize("exp", ONE_D[:3], ids=_ids(ONE_D[:3]))

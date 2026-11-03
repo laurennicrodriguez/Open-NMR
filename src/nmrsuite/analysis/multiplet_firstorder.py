@@ -45,6 +45,12 @@ MAX_PARTNERS_MIXED = 3
 #: Multiplets smaller than this many protons (after scaling) are flagged as minor
 #: and left out of the report.
 MINOR_H = 0.5
+#: Lines below this fraction of the tallest compound line are not analysed as multiplets.
+MULTIPLET_MIN_RELATIVE = 0.005
+#: Multiplets below this fraction of the largest do not set the automatic proton scale.
+SCALE_MIN_RELATIVE = 0.05
+#: The line-matching tolerance is at most this fraction of the smallest line spacing.
+RESOLVED_FRACTION = 0.6
 #: Integration window beyond the outer lines, in median line widths.
 INTEGRAL_PAD_FWHM = 12.0
 #: A split between multiplets above this fraction of the region's tallest point is not baseline.
@@ -164,6 +170,10 @@ def _evaluate(
     a = np.column_stack([coef, np.ones(len(coef))])
     sol, *_ = np.linalg.lstsq(a, hz[owner], rcond=None)
     refined = [Coupling(float(j), c.n) for j, c in zip(sol[:-1], couplings, strict=True)]
+    # Merged sticks may leave the J values barely constrained: a refinement that wanders
+    # away from the measured spacings is not a reading of this multiplet.
+    if np.any(np.abs(sol[:-1] - jv) > tol):
+        return None
     rms = float(np.sqrt(np.mean((a @ sol - hz[owner]) ** 2)))
     score = rms / tol + 2.0 * int_err + 0.05 * sum(c.n for c in couplings)
     return score, refined
@@ -202,6 +212,9 @@ def analyse_lines(
             return
         for k in range(start, len(cand)):
             j = cand[k]
+            # two couplings the spectrum cannot separate are one coupling with more partners
+            if any(abs(j - c.j_hz) <= tol for c in chosen):
+                continue
             for mult in range(1, 7):
                 if mult * j > remaining + tol:
                     break
@@ -247,6 +260,10 @@ def _cluster(
 def _build(lines: list[Peak], tol: float, typical_width: float, obs_mhz: float) -> Multiplet:
     hz = np.array([p.hz for p in lines])
     amp = np.array([p.intensity for p in lines])
+    if hz.size > 1:
+        # lines the spectrum resolves must not merge in the model: on broad spectra the
+        # width-based tolerance can exceed this multiplet's own smallest spacing
+        tol = min(tol, RESOLVED_FRACTION * float(np.diff(np.sort(hz)).min()))
     pattern, couplings, score = analyse_lines(hz, amp, tol)
     # median: a small line on the side of a taller one measures far too wide
     half = float(np.median([p.width_hz for p in lines]))
@@ -290,6 +307,9 @@ def detect_multiplets(
     compound = peaks.of_kind("compound")
     if not compound:
         return []
+    # Very small lines (ringing, unlabelled impurities) stay in the peak table only
+    tallest = max(p.intensity for p in compound)
+    compound = [p for p in compound if p.intensity >= MULTIPLET_MIN_RELATIVE * tallest]
     typical = float(np.median([p.width_hz for p in compound if p.width_hz > 0] or [1.0]))
     tol = max(0.3, 0.6 * typical)
     obs = nmr.direct.obs_mhz
@@ -318,7 +338,7 @@ def _assign_protons(
     """Whole-proton counts; tiny multiplets (impurities, satellites) become 'minor'.
 
     Without an explicit ``scale`` (area per proton) it is chosen from the substantial
-    multiplets only (≥ 20 % of the median area), so a small unlabelled impurity cannot
+    multiplets only (≥ 5 % of the largest), so a small unlabelled impurity cannot
     be taken as the 1H reference. Automatic counts are suggestions: with no formula
     an incomplete multiplet can still halve the scale. Pass ``total_h`` or use
     :func:`normalize_multiplets` when it matters.
@@ -327,7 +347,7 @@ def _assign_protons(
     if not areas.size or areas.max() <= 0:
         return
     if scale is None:
-        big = areas >= 0.2 * np.median(areas)
+        big = areas >= SCALE_MIN_RELATIVE * areas.max()
         scale, _ = auto_proton_counts(areas[big], total=total_h)
     for m, a in zip(mults, areas, strict=True):
         m.flags = [f for f in m.flags if f != "minor"]

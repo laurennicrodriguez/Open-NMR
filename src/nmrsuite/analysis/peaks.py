@@ -27,14 +27,14 @@ from nmrsuite.processing.reference import (
     canonical_solvent,
     solvent_of,
 )
-from nmrsuite.processing.utils import refine_peak
+from nmrsuite.processing.utils import refine_peak, satellite_parents
 
 PeakKind = Literal["compound", "solvent", "impurity", "c13_satellite", "artifact"]
 
-#: ¹J(C,H) range (Hz) for ¹³C satellites; satellites sit at ±J/2 from the parent.
-C13_SATELLITE_J_HZ = (110.0, 220.0)
-#: Satellite height relative to the parent (0.55 % each for natural abundance).
-C13_SATELLITE_RATIO = (0.0015, 0.015)
+#: A small peak this close to a ¹H solvent residual, and at most this fraction of the
+#: residual's tallest line, is part of the residual's foot.
+SOLVENT_FOOT_HZ = 35.0
+SOLVENT_FOOT_RATIO = 0.05
 #: Smallest noise level assumed, relative to the tallest point.
 NOISE_FLOOR = 1e-6
 #: Water's shift depends on concentration and temperature.
@@ -46,6 +46,10 @@ IMPURITY_BRACKET_HZ = 10.0
 SPIKE_POINTS = 2.5
 BROAD_HZ = 20.0
 BROAD_FACTOR = 10.0
+#: Lines at least this fraction of the tallest define the typical width of real lines.
+STRONG_LINE_RATIO = 0.05
+#: A broad peak below this fraction of the tallest line is a hump on a tail.
+TAIL_HUMP_RATIO = 0.02
 
 
 @dataclass
@@ -188,6 +192,14 @@ def _mark_solvent(pl: PeakList) -> None:
         reach = half + max(0.0, p.width_hz - BROAD_HZ) / 2
         if any(abs(p.ppm - s) * pl.obs_mhz <= reach for s in shifts):
             p.kind, p.note = "solvent", pl.solvent
+    if pl.nucleus != "1H":
+        return
+    # Small features on the residual's foot (shimming sidebands) are not compound signals
+    tallest = max((p.intensity for p in pl.peaks if p.kind == "solvent"), default=0.0)
+    for p in pl.peaks:
+        near = any(abs(p.ppm - s) * pl.obs_mhz <= SOLVENT_FOOT_HZ for s in shifts)
+        if near and p.kind == "compound" and p.intensity <= SOLVENT_FOOT_RATIO * tallest:
+            p.kind, p.note = "solvent", f"{pl.solvent} (foot of the residual)"
 
 
 def _mark_satellites(pl: PeakList) -> None:
@@ -196,26 +208,10 @@ def _mark_satellites(pl: PeakList) -> None:
         return
     hz = np.array([p.hz for p in peaks])
     amp = np.array([p.intensity for p in peaks])
-    order = np.argsort(-amp)
-    lo, hi = (j / 2 for j in C13_SATELLITE_J_HZ)
-    for k in order[: min(len(order), 30)]:
-        parent = peaks[k]
-        if parent.intensity <= 0:
-            continue
-        ratio = amp / parent.intensity
-        cand = (ratio >= C13_SATELLITE_RATIO[0]) & (ratio <= C13_SATELLITE_RATIO[1])
-        left = np.nonzero(cand & (hz > parent.hz + lo) & (hz < parent.hz + hi))[0]
-        right = np.nonzero(cand & (hz < parent.hz - lo) & (hz > parent.hz - hi))[0]
-        for a in left:
-            for b in right:
-                da, db = hz[a] - parent.hz, parent.hz - hz[b]
-                # symmetric about the parent (isotope shift ≲ 1 Hz); heights may differ
-                # several-fold (isotope shift, different widths, overlap)
-                if abs(da - db) < 3.0 and 0.25 < amp[a] / amp[b] < 4.0:
-                    for j in (a, b):
-                        if peaks[j].kind == "compound":
-                            peaks[j].kind = "c13_satellite"
-                            peaks[j].note = f"{parent.ppm:.3f}, 1J(CH) ≈ {da + db:.0f} Hz"
+    for j, (k, coupling) in satellite_parents(hz, amp).items():
+        if peaks[j].kind == "compound":
+            peaks[j].kind = "c13_satellite"
+            peaks[j].note = f"{peaks[k].ppm:.3f}, 1J(CH) ≈ {coupling:.0f} Hz"
 
 
 def _mark_impurities(pl: PeakList) -> None:
@@ -261,9 +257,17 @@ def _mark_artifacts(pl: PeakList, hz_per_pt: float) -> None:
     lines — are wider than BROAD_HZ and BROAD_FACTOR × the median line width. An
     exchange-broadened OH/NH can also land here; it is kept in the peak list, marked,
     and left out of automatic multiplets.
+
+    Small peaks on the tail of a strong line never fall to half their height, so they
+    measure tens of Hz wide. Many of them inflate the median, so these are judged
+    against the width of the strong lines alone, and only if they are small
+    (TAIL_HUMP_RATIO), which keeps real broad NH/OH signals.
     """
-    widths = [p.width_hz for p in pl.peaks if p.kind == "compound" and p.width_hz > 0]
-    typical = float(np.median(widths)) if widths else 1.0
+    compound = [p for p in pl.peaks if p.kind == "compound" and p.width_hz > 0]
+    typical = float(np.median([p.width_hz for p in compound])) if compound else 1.0
+    tallest = max((p.intensity for p in compound), default=0.0)
+    strong = [p.width_hz for p in compound if p.intensity >= STRONG_LINE_RATIO * tallest]
+    strong_typical = float(np.median(strong)) if strong else typical
     for p in pl.peaks:
         if p.kind != "compound":
             continue
@@ -271,6 +275,11 @@ def _mark_artifacts(pl: PeakList, hz_per_pt: float) -> None:
             p.kind, p.note = "artifact", "spike (narrower than the digital resolution allows)"
         elif p.width_hz > max(BROAD_HZ, BROAD_FACTOR * typical):
             p.kind, p.note = "artifact", "broad: baseline hump or exchange-broadened signal"
+        elif (
+            p.width_hz > max(BROAD_HZ, BROAD_FACTOR * strong_typical)
+            and p.intensity < TAIL_HUMP_RATIO * tallest
+        ):
+            p.kind, p.note = "artifact", "small hump on the tail of a strong line"
 
 
 def classify_peaks(pl: PeakList) -> PeakList:

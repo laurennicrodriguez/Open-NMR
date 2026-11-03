@@ -171,6 +171,11 @@ and runs in 0.15–0.4 s per 64k-point spectrum (budget: 1 s).
 aliphatic protons integrated to 10.8 H with it and 18.6 H with airPLS. Across 17 ¹H spectra
 airPLS matched TopSpin's final spectrum at least as well (correlation ≥ 0.990).
 
+A correct baseline also exposes tiny features the polynomial's negative offset used to hide,
+so the analysis handles them explicitly: the reference search skips ¹³C satellites and small
+humps, peaks on a solvent's foot count as solvent, lines under 0.5 % of the tallest compound
+line stay out of multiplets, and very small fragments cannot set the proton scale.
+
 **Known limitations**
 
 - DEPT-135/APT phasing: with few peaks the first-order phase is underdetermined, and

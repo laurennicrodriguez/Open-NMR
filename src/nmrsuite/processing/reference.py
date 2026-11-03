@@ -33,7 +33,13 @@ import numpy as np
 from nmrsuite.data import NMRData
 from nmrsuite.history import processing_step
 from nmrsuite.io._paramfile import read_param_file
-from nmrsuite.processing.utils import noise_sigma, ppm_to_index, refine_peak
+from nmrsuite.processing.utils import (
+    half_height_points,
+    noise_sigma,
+    ppm_to_index,
+    refine_peak,
+    satellite_parents,
+)
 
 #: Residual solvent signals (ppm) used for referencing: the first entry per nucleus.
 SOLVENT_SHIFTS: dict[str, dict[str, list[float]]] = {
@@ -123,6 +129,8 @@ SEARCH_WINDOW_X_PPM = 1.5
 #: multiplet that happens to sit near the expected shift).
 ISOLATION_FRACTION = 0.25
 ISOLATION_HZ = (1.5, 15.0)
+#: Lines broader than this are not considered as a ¹H reference signal.
+REFERENCE_MAX_WIDTH_HZ = 15.0
 
 
 def _local_maxima(y: np.ndarray, threshold: float) -> np.ndarray:
@@ -173,8 +181,23 @@ def find_reference_peak(
     pts_per_hz = d.size / d.sw_hz
     pool = cand
     if prefer_isolated:
+        # A ¹³C satellite of a compound line can sit closer to the expected shift than a
+        # weak residual, and small humps on a strong line's tail are not sharp lines.
+        sats = set(satellite_parents(maxima / pts_per_hz, y[maxima]))
+        real = np.array([m for j, m in enumerate(maxima) if j not in sats], int)
+        sharp = np.array(
+            [
+                i
+                for i in cand
+                if i in real
+                and half_height_points(y, int(i)) <= REFERENCE_MAX_WIDTH_HZ * pts_per_hz
+            ],
+            int,
+        )
+        if sharp.size:
+            pool = sharp
         iso = np.array(
-            [i for i in cand if _is_isolated(y, maxima, int(i), pts_per_hz, pattern_hz)], int
+            [i for i in pool if _is_isolated(y, real, int(i), pts_per_hz, pattern_hz)], int
         )
         if iso.size:
             pool = iso

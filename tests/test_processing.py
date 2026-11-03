@@ -310,6 +310,21 @@ def test_reference_13c_cd3cn_septet_far_off() -> None:
     assert out.history[-1]["result"]["shift_ppm"] == pytest.approx(-off, abs=0.005)
 
 
+def test_reference_skips_c13_satellites_and_humps() -> None:
+    """Real case (2-ethylpyridine): a satellite of a compound doublet lies nearer 7.26
+    than the weak CHCl3 residual, which is the line to reference to."""
+    j = 7.85 / BF
+    half = 79.0 / BF  # ¹J(C,H) = 158 Hz
+    doublet = [(7.11 - j / 2, 1.0), (7.11 + j / 2, 1.0)]
+    sats = [(p + s, 0.0055) for p, _ in doublet for s in (half, -half)]
+    s = spectrum(
+        [p for p, _ in doublet + sats] + [7.35], amps=[a for _, a in doublet + sats] + [0.008]
+    )
+    s.params["acqus"] = {"SOLVENT": "CDCl3"}
+    out = reference(s)
+    assert out.history[-1]["result"]["shift_ppm"] == pytest.approx(7.26 - 7.35, abs=2e-3)
+
+
 def test_reference_failure_is_optional() -> None:
     s = spectrum([3.0])  # no CHCl3 residual anywhere near 7.26
     s.params["acqus"] = {"SOLVENT": "CDCl3"}

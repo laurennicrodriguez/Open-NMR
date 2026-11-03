@@ -34,6 +34,52 @@ def find_peak_indices(
     return idx[:max_peaks] if max_peaks else idx
 
 
+#: ¹J(C,H) range (Hz) for ¹³C satellites; satellites sit at ±J/2 from the parent.
+C13_SATELLITE_J_HZ = (110.0, 220.0)
+#: Satellite height relative to the parent (0.55 % each for natural abundance).
+C13_SATELLITE_RATIO = (0.0015, 0.015)
+
+
+def satellite_parents(
+    hz: np.ndarray, amp: np.ndarray, max_parents: int = 30
+) -> dict[int, tuple[int, float]]:
+    """¹³C satellites among lines at ``hz`` with heights ``amp``: {line: (parent, ¹J in Hz)}.
+
+    A satellite pair lies symmetrically about a much taller parent (isotope shift ≲ 1 Hz,
+    so within 3 Hz), each 0.15–1.5 % of its height. The two may differ several-fold in
+    height (isotope shift, different widths, overlap).
+    """
+    hz, amp = np.asarray(hz, float), np.asarray(amp, float)
+    lo, hi = (j / 2 for j in C13_SATELLITE_J_HZ)
+    found: dict[int, tuple[int, float]] = {}
+    for k in np.argsort(-amp)[:max_parents]:
+        if amp[k] <= 0:
+            continue
+        ratio = amp / amp[k]
+        cand = (ratio >= C13_SATELLITE_RATIO[0]) & (ratio <= C13_SATELLITE_RATIO[1])
+        above = np.nonzero(cand & (hz > hz[k] + lo) & (hz < hz[k] + hi))[0]
+        below = np.nonzero(cand & (hz < hz[k] - lo) & (hz > hz[k] - hi))[0]
+        for a in above:
+            for b in below:
+                da, db = hz[a] - hz[k], hz[k] - hz[b]
+                if abs(da - db) < 3.0 and 0.25 < amp[a] / amp[b] < 4.0:
+                    found.setdefault(int(a), (int(k), float(da + db)))
+                    found.setdefault(int(b), (int(k), float(da + db)))
+    return found
+
+
+def half_height_points(y: np.ndarray, i: int) -> int:
+    """Full width of the maximum at ``i`` at half its height, in points (integer)."""
+    h = y[i] / 2
+    left = i
+    while left > 0 and y[left] > h:
+        left -= 1
+    right = i
+    while right < y.size - 1 and y[right] > h:
+        right += 1
+    return right - left
+
+
 def ppm_to_index(dim: Dimension, ppm: float) -> float:
     """Fractional point index of a chemical shift on a frequency axis."""
     if dim.offset_ppm is None:
