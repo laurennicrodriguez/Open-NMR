@@ -1,0 +1,6 @@
+# Mnova fully automatic multiplet report, as provided by Lauren on 2026-11-02.
+# Compound: LR-7-82-2 (raw folder "LR-7-82-2"). Cleared for publication by Lauren on 2026-11-02.
+# Mnova version: 14.2.3-29241 (x86_64).
+# Method: fully automatic multiplet analysis; auto phase and auto baseline correction;
+# CD3CN residual set by hand to 1.94 ppm.
+1H NMR (500 MHz, CD3CN) δ 8.92 – 8.87 (m, 2H), 8.73 – 8.66 (tt, J = 7.9, 1.4 Hz, 1H), 8.23 – 8.17 (m, 2H), 7.77 – 7.71 (d, J = 9.0 Hz, 2H), 7.74 – 7.66 (m, 2H).

@@ -1,0 +1,20 @@
+{
+  "compound": "LR-6-56",
+  "experiment": "1",
+  "solvent": "CDCl3",
+  "reference_ppm": 7.26,
+  "source": "Hand-drawn Mnova multiplet ranges, from mnova_manual_report.txt, lowered by 0.026 ppm to align with CHCl3 = 7.26",
+  "regions_ppm": [
+    [7.364, 7.324],
+    [7.314, 7.274],
+    [7.244, 7.204],
+    [2.974, 2.904],
+    [2.774, 2.694],
+    [2.014, 1.924],
+    [1.914, 1.774],
+    [1.754, 1.694],
+    [1.674, 1.454],
+    [1.454, 1.384],
+    [1.374, 1.294]
+  ]
+}

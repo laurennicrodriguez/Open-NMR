@@ -1,0 +1,10 @@
+# Expert hand analysis by Lauren, provided 2026-11-02. Not Mnova's multiplet output.
+# Compound: LR-6-60, a bioactive lobeline derivative (previously published; cleared for publication).
+# Raw folder: "LR-6-60-LOBELANE".
+# Processed in Mnova 14.2.3-29241 (x86_64): auto phase and auto baseline correction.
+# J values measured and added manually.
+# Referencing: the reported shifts appear set to the tallest aromatic line, not CHCl3, so at Lauren's
+# request every shift below was lowered by 0.0325 ppm to align with CHCl3 = 7.26. Patterns and J values
+# are unchanged.
+# As reported: δ 7.38 – 7.31 (m, 4H), 7.28 – 7.22 (m, 6H), 3.02 – 2.91 (ddt, J = 17.1, 6.9, 4.1 Hz, 1H), 2.77 – 2.64 (m, 4H), 2.64 – 2.51 (ddtd, J = 19.9, 13.2, 6.8, 2.7 Hz, 1H), 1.89 – 1.83 (dq, J = 13.1, 3.6 Hz, 1H), 1.82 – 1.59 (m, 6H), 1.61 – 1.26 (m, 4H), 1.24 – 1.05 (m, 1H).
+1H NMR (500 MHz, CDCl3) δ 7.3475 – 7.2775 (m, 4H), 7.2475 – 7.1875 (m, 6H), 2.9875 – 2.8775 (ddt, J = 17.1, 6.9, 4.1 Hz, 1H), 2.7375 – 2.6075 (m, 4H), 2.6075 – 2.4775 (ddtd, J = 19.9, 13.2, 6.8, 2.7 Hz, 1H), 1.8575 – 1.7975 (dq, J = 13.1, 3.6 Hz, 1H), 1.7875 – 1.5575 (m, 6H), 1.5775 – 1.2275 (m, 4H), 1.2075 – 1.0175 (m, 1H).
