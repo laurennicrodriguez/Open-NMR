@@ -1,6 +1,6 @@
 import numpy as np
 
-from conftest import lorentzian_fid
+from conftest import lorentzian_fid, synth_spectrum
 from nmrsuite.cli import main
 from nmrsuite.io.jcamp import read_jcamp
 
@@ -69,6 +69,14 @@ def test_multiplets_command(tmp_path, capsys) -> None:
     assert main(["multiplets", str(exp), "--normalize", "7.60=2", "--plain", "--style", "RSC"]) == 0
     first = capsys.readouterr().out.splitlines()[0]
     assert first.startswith("δH (500 MHz, CDCl3) 7.81 (4H,")
+
+
+def test_multiplets_notes_signals_left_out_of_the_report(monkeypatch, capsys) -> None:
+    s = synth_spectrum([(7.0, 1.0), (3.0, 0.1)], noise=1e-5)
+    monkeypatch.setattr("nmrsuite.cli._process_one", lambda *_, **__: s)
+    assert main(["multiplets", "unused", "--normalize", "7.00=1"]) == 0
+    out = capsys.readouterr().out
+    assert "3.00 ppm integrates below 0.5 H; left out of the report" in out
 
 
 def test_process_folder_to_out_dir(tmp_path) -> None:

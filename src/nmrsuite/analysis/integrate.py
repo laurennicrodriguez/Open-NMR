@@ -17,6 +17,9 @@ from nmrsuite.analysis.peaks import PeakList, estimate_noise
 from nmrsuite.data import NMRData
 from nmrsuite.processing.utils import ppm_to_index
 
+#: A region edge above this fraction of the tallest point is on signal, not baseline.
+EDGE_SIGNAL_FRACTION = 0.05
+
 
 @dataclass
 class Integral:
@@ -67,7 +70,11 @@ class IntegralList:
 def integrate_region(
     nmr: NMRData, ppm_from: float, ppm_to: float, slope_bias: bool = True, edge: int = 4
 ) -> float:
-    """Area between two shifts; optional linear slope/bias correction from the edges."""
+    """Area between two shifts; optional linear slope/bias correction from the edges.
+
+    The correction is skipped when an edge is above EDGE_SIGNAL_FRACTION of the region's
+    tallest point: that edge is on the side of a peak, not on baseline.
+    """
     d = nmr.direct
     y = np.real(nmr.data)
     i0 = int(np.floor(ppm_to_index(d, max(ppm_from, ppm_to))))
@@ -78,7 +85,8 @@ def integrate_region(
         return 0.0
     if slope_bias and seg.size > 2 * edge:
         a, b = seg[:edge].mean(), seg[-edge:].mean()
-        seg = seg - np.linspace(a, b, seg.size)
+        if max(abs(a), abs(b)) <= EDGE_SIGNAL_FRACTION * np.abs(seg).max():
+            seg = seg - np.linspace(a, b, seg.size)
     return float(seg.sum() * d.sw_hz / d.size)
 
 

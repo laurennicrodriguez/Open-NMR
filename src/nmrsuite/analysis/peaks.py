@@ -39,6 +39,8 @@ C13_SATELLITE_RATIO = (0.0015, 0.015)
 NOISE_FLOOR = 1e-6
 #: Water's shift depends on concentration and temperature.
 WATER_TOLERANCE_PPM = 0.06
+#: Reach (Hz) within which taller compound lines on both sides overrule an impurity shift.
+IMPURITY_BRACKET_HZ = 10.0
 #: Artefact thresholds: spikes narrower than this many points; broad features wider
 #: than both BROAD_HZ and BROAD_FACTOR × the median line width.
 SPIKE_POINTS = 2.5
@@ -226,7 +228,8 @@ def _mark_impurities(pl: PeakList) -> None:
     # Only small peaks are labelled (a big peak at 1.26 ppm is the compound's own),
     # except water, whose shift and size vary but which is always water.
     limit = 0.2 * max(compound)
-    for p in pl.peaks:
+    candidates: dict[int, list[str]] = {}
+    for k, p in enumerate(pl.peaks):
         if p.kind != "compound":
             continue
         if any(abs(p.ppm - s) <= WATER_TOLERANCE_PPM for s in table.get("water", [])):
@@ -240,6 +243,14 @@ def _mark_impurities(pl: PeakList) -> None:
             if name != "water" and any(abs(p.ppm - s) <= IMPURITY_TOLERANCE_PPM for s in shifts)
         ]
         if hits:
+            candidates[k] = hits
+    # A line with taller compound lines close on both sides belongs to their multiplet.
+    others = [q for k, q in enumerate(pl.peaks) if q.kind == "compound" and k not in candidates]
+    for k, hits in candidates.items():
+        p = pl.peaks[k]
+        near = [q for q in others if q.intensity > p.intensity
+                and abs(q.hz - p.hz) <= IMPURITY_BRACKET_HZ]  # fmt: skip
+        if not (any(q.hz > p.hz for q in near) and any(q.hz < p.hz for q in near)):
             p.kind, p.note = "impurity", " or ".join(hits)
 
 
