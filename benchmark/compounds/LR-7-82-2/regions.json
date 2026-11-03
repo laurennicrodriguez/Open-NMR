@@ -1,0 +1,14 @@
+﻿{
+  "compound": "LR-7-82-2",
+  "experiment": "1",
+  "solvent": "CD3CN",
+  "reference_ppm": 1.94,
+  "source": "Hand-drawn Mnova multiplet ranges, from mnova_manual_report.txt",
+  "regions_ppm": [
+    [8.92, 8.87],
+    [8.72, 8.67],
+    [8.24, 8.15],
+    [7.77, 7.72],
+    [7.72, 7.66]
+  ]
+}
