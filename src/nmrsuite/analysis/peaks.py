@@ -39,6 +39,7 @@ C13_SATELLITE_RATIO = (0.0015, 0.015)
 NOISE_FLOOR = 1e-6
 #: Water's shift depends on concentration and temperature.
 WATER_TOLERANCE_PPM = 0.06
+WATER_PEAK_HZ = 5.0
 #: Reach (Hz) within which taller compound lines on both sides overrule an impurity shift.
 IMPURITY_BRACKET_HZ = 10.0
 #: Artefact thresholds: spikes narrower than this many points; broad features wider
@@ -223,13 +224,31 @@ def _mark_impurities(pl: PeakList) -> None:
         return
     table = IMPURITIES_1H[pl.solvent]
     # Only small peaks are labelled (a big peak at 1.26 ppm is the compound's own),
-    # except water, whose shift and size vary but which is always water.
-    limit = 0.2 * max(compound)
+    # except water, whose shift and size vary: the line nearest the water shift, and
+    # any line within WATER_PEAK_HZ of it (a lumpy water peak), is water whatever its
+    # size; others nearby are water only if small (a methyl singlet beside water, e.g.
+    # at 3.34 in DMSO or 2.08 in CD3CN, is the compound's)
+    water = [
+        k for k, p in enumerate(pl.peaks)
+        if p.kind == "compound"
+        and any(abs(p.ppm - s) <= WATER_TOLERANCE_PPM for s in table.get("water", []))
+    ]  # fmt: skip
+    nearest = min(
+        water,
+        key=lambda k: min(abs(pl.peaks[k].ppm - s) for s in table["water"]),
+        default=None,
+    )
+    # sized against the compound alone: water can be the tallest line by far
+    limit = 0.2 * max(
+        (p.intensity for k, p in enumerate(pl.peaks) if p.kind == "compound" and k != nearest),
+        default=max(compound),
+    )
     candidates: dict[int, list[str]] = {}
     for k, p in enumerate(pl.peaks):
         if p.kind != "compound":
             continue
-        if any(abs(p.ppm - s) <= WATER_TOLERANCE_PPM for s in table.get("water", [])):
+        own = nearest is not None and abs(p.hz - pl.peaks[nearest].hz) <= WATER_PEAK_HZ
+        if k in water and (own or p.intensity <= limit):
             p.kind, p.note = "impurity", "water"
             continue
         if p.intensity > limit:

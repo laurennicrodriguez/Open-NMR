@@ -224,3 +224,13 @@ def test_small_lines_beside_a_strong_residual_are_solvent() -> None:
     s = synth_spectrum([*quintet, (1.92, 0.02), (7.0, 1.0)], noise=1e-5, solvent="CD3CN")
     kinds = {round(p.ppm, 2): p.kind for p in pick_peaks(s).peaks}
     assert kinds[1.92] == "solvent" and kinds[7.0] == "compound"
+
+
+def test_methyl_beside_water_in_dmso_is_the_compound() -> None:
+    """Vismodegib-like: a CH3 singlet at 3.345 next to a taller water line at 3.33."""
+    dmso = [(2.50 + k * 0.0036, a) for k, a in zip(range(-2, 3), (1, 2, 3, 2, 1), strict=True)]
+    lines = [(7.59, 1.0), (7.45, 1.0), (3.345, 3.0), (3.33, 10.0), (2.53, 0.02), *dmso]
+    s = synth_spectrum(lines, noise=1e-5, solvent="DMSO-d6")
+    counts = [(m.ppm, m.n_h) for m in detect_multiplets(s) if m.n_h]
+    assert [n for _, n in counts] == [1, 1, 3]
+    assert counts[-1][0] == pytest.approx(3.345, abs=0.005)
