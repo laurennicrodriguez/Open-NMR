@@ -89,13 +89,13 @@ def test_default_baseline_depends_on_the_nucleus() -> None:
         step = next(r for r in default_recipe_1d(nmr) if r["step"] == "baseline")
         return step.get("params", {}).get("method")
 
-    assert method(raw_fid()) == "airpls"
+    assert method(raw_fid()) == "signalfree"
     carbon = raw_fid()
     carbon.dims = [Dimension("13C", 4096, 5000.0, 125.0, bf_mhz=125.0, carrier_ppm=100.0)]
     assert method(carbon) is None  # the step's own default, polynomial
     negative = raw_fid()
     negative.experiment = "DEPT-135"
-    assert method(negative) is None  # airPLS assumes positive peaks
+    assert method(negative) is None
 
 
 def test_registry_and_unknown_step() -> None:

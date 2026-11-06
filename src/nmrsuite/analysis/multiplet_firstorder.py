@@ -45,6 +45,8 @@ MAX_PARTNERS_MIXED = 3
 #: Multiplets smaller than this many protons (after scaling) are flagged as minor
 #: and left out of the report.
 MINOR_H = 0.5
+#: The largest proton count one multiplet is taken to hold when choosing the scale.
+MAX_H_PER_REGION = 12
 #: Integration window beyond the outer lines, in median line widths.
 INTEGRAL_PAD_FWHM = 12.0
 #: A split between multiplets above this fraction of the region's tallest point is not baseline.
@@ -298,13 +300,15 @@ def detect_multiplets(
     for cl in _cluster(compound, gap_hz, regions):
         m = _build(cl, tol, typical, obs)
         if m.pattern == "m" and len(cl) >= 4:
-            # maybe two multiplets close together: try the largest gap
+            # maybe two multiplets close together: try the largest gap, if it is a real
+            # gap between lines rather than the spacing inside one unresolved multiplet
             hz = np.array([p.hz for p in cl])
             k = int(np.argmax(np.diff(hz))) + 1
-            a, b = _build(cl[:k], tol, typical, obs), _build(cl[k:], tol, typical, obs)
-            if a.pattern != "m" and b.pattern != "m":
-                out += [a, b]
-                continue
+            if hz[k] - hz[k - 1] >= 2 * typical:
+                a, b = _build(cl[:k], tol, typical, obs), _build(cl[k:], tol, typical, obs)
+                if a.pattern != "m" and b.pattern != "m":
+                    out += [a, b]
+                    continue
         out.append(m)
     out.sort(key=lambda m: -m.ppm)
     _integrate(nmr, out, typical)
@@ -318,16 +322,17 @@ def _assign_protons(
     """Whole-proton counts; tiny multiplets (impurities, satellites) become 'minor'.
 
     Without an explicit ``scale`` (area per proton) it is chosen from the substantial
-    multiplets only (≥ 20 % of the median area), so a small unlabelled impurity cannot
-    be taken as the 1H reference. Automatic counts are suggestions: with no formula
-    an incomplete multiplet can still halve the scale. Pass ``total_h`` or use
+    multiplets only (≥ 20 % of the median area and ≥ 1/MAX_H_PER_REGION of the largest),
+    so a small unlabelled impurity cannot be taken as the 1H reference. Automatic counts
+    are suggestions: with no formula an incomplete multiplet can still halve the scale.
+    Pass ``total_h`` or use
     :func:`normalize_multiplets` when it matters.
     """
     areas = np.array([max(m.integral, 0.0) for m in mults])
     if not areas.size or areas.max() <= 0:
         return
     if scale is None:
-        big = areas >= 0.2 * np.median(areas)
+        big = areas >= max(0.2 * np.median(areas), areas.max() / MAX_H_PER_REGION)
         scale, _ = auto_proton_counts(areas[big], total=total_h)
     for m, a in zip(mults, areas, strict=True):
         m.flags = [f for f in m.flags if f != "minor"]
