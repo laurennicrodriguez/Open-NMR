@@ -45,6 +45,11 @@ MAX_PARTNERS_MIXED = 3
 #: Multiplets smaller than this many protons (after scaling) are flagged as minor
 #: and left out of the report.
 MINOR_H = 0.5
+#: Lines below this fraction of their cluster's tallest are left out of its pattern
+#: (the outer lines of a nonet are 1/70 of its centre).
+MIN_LINE_FRACTION = 0.01
+#: The largest proton count one multiplet is taken to hold when choosing the scale.
+MAX_H_PER_REGION = 12
 #: Integration window beyond the outer lines, in median line widths.
 INTEGRAL_PAD_FWHM = 12.0
 #: A split between multiplets above this fraction of the region's tallest point is not baseline.
@@ -296,18 +301,26 @@ def detect_multiplets(
     regions = auto_regions(nmr, peaks)
     out: list[Multiplet] = []
     for cl in _cluster(compound, gap_hz, regions):
+        # specks beside a strong line (impurities, noise) are not part of its pattern
+        cl = [p for p in cl if p.intensity >= MIN_LINE_FRACTION * max(q.intensity for q in cl)]
         m = _build(cl, tol, typical, obs)
         if m.pattern == "m" and len(cl) >= 4:
-            # maybe two multiplets close together: try the largest gap
+            # maybe two multiplets close together: try the largest gap, if it is a real
+            # gap between lines rather than the spacing inside one unresolved multiplet
             hz = np.array([p.hz for p in cl])
             k = int(np.argmax(np.diff(hz))) + 1
-            a, b = _build(cl[:k], tol, typical, obs), _build(cl[k:], tol, typical, obs)
-            if a.pattern != "m" and b.pattern != "m":
-                out += [a, b]
-                continue
+            if hz[k] - hz[k - 1] >= 2 * typical:
+                a, b = _build(cl[:k], tol, typical, obs), _build(cl[k:], tol, typical, obs)
+                if a.pattern != "m" and b.pattern != "m":
+                    out += [a, b]
+                    continue
         out.append(m)
     out.sort(key=lambda m: -m.ppm)
-    _integrate(nmr, out, typical)
+    # solvent lines always end an integral; water only where it is a real peak (the
+    # line nearest the water shift can be a compound line when the sample is dry)
+    walls = [(p.ppm, np.inf if p.kind == "solvent" else p.intensity)
+             for p in peaks.peaks if p.kind == "solvent" or p.note == "water"]  # fmt: skip
+    _integrate(nmr, out, typical, walls)
     _assign_protons(out, total_h)
     return out
 
@@ -318,16 +331,17 @@ def _assign_protons(
     """Whole-proton counts; tiny multiplets (impurities, satellites) become 'minor'.
 
     Without an explicit ``scale`` (area per proton) it is chosen from the substantial
-    multiplets only (≥ 20 % of the median area), so a small unlabelled impurity cannot
-    be taken as the 1H reference. Automatic counts are suggestions: with no formula
-    an incomplete multiplet can still halve the scale. Pass ``total_h`` or use
+    multiplets only (≥ 20 % of the median area and ≥ 1/MAX_H_PER_REGION of the largest),
+    so a small unlabelled impurity cannot be taken as the 1H reference. Automatic counts
+    are suggestions: with no formula an incomplete multiplet can still halve the scale.
+    Pass ``total_h`` or use
     :func:`normalize_multiplets` when it matters.
     """
     areas = np.array([max(m.integral, 0.0) for m in mults])
     if not areas.size or areas.max() <= 0:
         return
     if scale is None:
-        big = areas >= 0.2 * np.median(areas)
+        big = areas >= max(0.2 * np.median(areas), areas.max() / MAX_H_PER_REGION)
         scale, _ = auto_proton_counts(areas[big], total=total_h)
     for m, a in zip(mults, areas, strict=True):
         m.flags = [f for f in m.flags if f != "minor"]
@@ -371,9 +385,24 @@ def _boundary_on_signal(nmr: NMRData, ppm: float, hi: float, lo: float) -> bool:
     return bool(y[round(ppm_to_index(d, ppm))] > BASELINE_FRACTION * y[i0 : i1 + 1].max())
 
 
-def _integrate(nmr: NMRData, mults: list[Multiplet], typical: float) -> None:
+def _valley_ppm(nmr: NMRData, a: float, b: float) -> float:
+    """The lowest point of the spectrum between two shifts."""
+    d = nmr.direct
+    i0, i1 = sorted(round(ppm_to_index(d, v)) for v in (a, b))
+    k = i0 + int(np.argmin(np.real(nmr.data)[i0 : i1 + 1]))
+    return d.offset_ppm - k * d.sw_ppm / d.size
+
+
+def _integrate(
+    nmr: NMRData,
+    mults: list[Multiplet],
+    typical: float,
+    walls: Sequence[tuple[float, float]] = (),
+) -> None:
     """Integrate each multiplet ±INTEGRAL_PAD_FWHM line widths beyond its outer lines
-    (Lorentzian tails hold real area), bounded by the splits to its neighbours. A split
+    (Lorentzian tails hold real area), bounded by the splits to its neighbours and by
+    the valley before any wall inside that pad: a (ppm, height) solvent or water line
+    taller than the multiplet's own lines. A split
     still on signal is not baseline, so that region gets no slope/bias correction."""
     obs = nmr.direct.obs_mhz
     pad = max(INTEGRAL_PAD_FWHM * typical, 3.0) / obs
@@ -381,7 +410,17 @@ def _integrate(nmr: NMRData, mults: list[Multiplet], typical: float) -> None:
     for i, m in enumerate(mults):  # sorted high → low ppm
         hi = m.ppm_from + pad
         lo = m.ppm_to - pad
+        top, bottom = max(m.lines_hz) / obs, min(m.lines_hz) / obs
         used = []
+        for w, height in walls:
+            if height <= max(m.lines_intensity):
+                continue
+            if top < w < hi:
+                hi = _valley_ppm(nmr, w, top)
+                used.append(hi)
+            elif lo < w < bottom:
+                lo = _valley_ppm(nmr, bottom, w)
+                used.append(lo)
         if i > 0 and splits[i - 1] < hi:
             hi = splits[i - 1]
             used.append(hi)

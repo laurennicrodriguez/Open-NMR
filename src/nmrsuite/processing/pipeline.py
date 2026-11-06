@@ -6,6 +6,7 @@ from typing import Any
 
 from nmrsuite.data import NMRData
 from nmrsuite.history import replay
+from nmrsuite.processing.phase import NEGATIVE_PEAK_EXPERIMENTS
 from nmrsuite.processing.reference import SOLVENT_SHIFTS, canonical_solvent, solvent_of
 
 SOLVENT_INVISIBLE = {"DEPT-135", "DEPT-90", "DEPT-45"}
@@ -16,18 +17,25 @@ def default_recipe_1d(nmr: NMRData) -> list[dict[str, Any]]:
 
     group delay → exponential window (per-nucleus LB) → zero fill ×2 → FT →
     automatic phase → baseline → solvent referencing (when the solvent is known).
+
+    ¹H uses the signal-free baseline: on crowded spectra the polynomial removes real
+    signal (LR-6-60 lost about 40 % of its aliphatic area). Other nuclei and experiments
+    with negative peaks keep the polynomial.
     """
     if nmr.ndim != 1 or nmr.direct.domain != "time":
         raise ValueError("the default 1D recipe needs a raw 1D FID")
     steps: list[dict[str, Any]] = []
     if nmr.group_delay:
         steps.append({"step": "remove_group_delay"})
+    baseline: dict[str, Any] = {"step": "baseline"}
+    if nmr.direct.nucleus == "1H" and nmr.experiment not in NEGATIVE_PEAK_EXPERIMENTS:
+        baseline["params"] = {"method": "signalfree"}
     steps += [
         {"step": "apodize", "params": {"kind": "em"}},
         {"step": "zerofill"},
         {"step": "fft"},
         {"step": "autophase"},
-        {"step": "baseline"},
+        baseline,
     ]
     solvent = solvent_of(nmr)
     # DEPT-135/90/45 cannot show the deuterated solvent's carbon (no attached H)

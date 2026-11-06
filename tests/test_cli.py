@@ -64,7 +64,8 @@ def test_multiplets_command(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     first = out.splitlines()[0]
     assert first.startswith("¹H NMR (500 MHz, CDCl₃) δ 7.81 (")
-    assert "2H), 7.60 (" in first and "solvent" in out
+    # the para-H's second-order pattern is left as "m" rather than a false first-order one
+    assert "2H), 7.62–7.57 (m, 1H)" in first and "solvent" in out
     assert peaks.read_text().startswith("ppm,") and integrals.read_text().startswith("ppm_from,")
     assert main(["multiplets", str(exp), "--normalize", "7.60=2", "--plain", "--style", "RSC"]) == 0
     first = capsys.readouterr().out.splitlines()[0]

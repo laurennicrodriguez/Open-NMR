@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from conftest import lorentzian_fid
+from conftest import lorentzian_fid, synth_spectrum
 from nmrsuite.data import Dimension, NMRData
 from nmrsuite.processing import (
     apodize,
@@ -25,7 +25,7 @@ from nmrsuite.processing import (
 )
 from nmrsuite.processing.apodize import default_lb
 from nmrsuite.processing.phase import apply_phase
-from nmrsuite.processing.utils import ppm_to_index
+from nmrsuite.processing.utils import noise_sigma, ppm_to_index
 
 SW = 5000.0
 BF = 500.0
@@ -202,7 +202,7 @@ def test_autophase_replays_exactly_from_result() -> None:
 # --- baseline ----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("method", ["poly", "airpls", "whittaker"])
+@pytest.mark.parametrize("method", ["poly", "signalfree", "airpls", "whittaker"])
 def test_baseline_removes_smooth_offset(method) -> None:
     s = phase(spectrum([8.0, 6.5, 3.0, 1.0]), p0=0.0)
     n = s.data.size
@@ -385,3 +385,27 @@ def test_steps_check_domain() -> None:
         phase(f, p0=10)
     with pytest.raises(ValueError):
         apodize(fft(f))
+
+
+def test_signalfree_baseline_bridges_a_crowded_region() -> None:
+    """A dense region stays on the true baseline, which airPLS and the polynomial can miss."""
+    lines = [(p, 0.5) for p in np.arange(1.0, 3.0, 0.012)] + [(7.0, 1.0)]
+    s = synth_spectrum(lines, noise=1e-4)
+    ppm = s.direct.ppm_axis()
+    drift = s.data.real.max() * 0.002 * (ppm - 5.0) / 5.0
+    done = baseline(s.copy_with(data=s.data + drift), method="signalfree")
+    empty = (ppm > 9.0) | (ppm < 0.0)
+    assert abs(np.mean(done.data.real[empty])) < 5 * noise_sigma(s.data.real)
+    region = (ppm > 0.9) & (ppm < 3.1)
+    np.testing.assert_allclose(done.data.real[region].sum(), s.data.real[region].sum(), rtol=0.02)
+
+
+def test_reference_prefers_a_singlet_standing_on_satellites() -> None:
+    """Concentrated sample: ¹³C satellites sit at 7.26, the real CHCl₃ at 7.35 among others."""
+    s = synth_spectrum(
+        [(7.10, 100.0), (7.117, 100.0), (7.276, 1.1), (7.26, 1.1),
+         (7.352, 2.0), (7.358, 1.0), (7.343, 0.6)],
+        noise=1e-4, solvent="CDCl3",
+    )  # fmt: skip
+    done = reference(s, method="solvent")
+    assert done.history[-1]["result"]["shift_ppm"] == pytest.approx(7.26 - 7.352, abs=0.002)

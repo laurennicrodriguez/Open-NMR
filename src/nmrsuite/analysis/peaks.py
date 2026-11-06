@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 
 from nmrsuite.analysis.impurities import IMPURITIES_1H, IMPURITY_TOLERANCE_PPM
 from nmrsuite.data import NMRData
@@ -39,11 +39,13 @@ C13_SATELLITE_RATIO = (0.0015, 0.015)
 NOISE_FLOOR = 1e-6
 #: Water's shift depends on concentration and temperature.
 WATER_TOLERANCE_PPM = 0.06
+WATER_PEAK_HZ = 5.0
 #: Reach (Hz) within which taller compound lines on both sides overrule an impurity shift.
 IMPURITY_BRACKET_HZ = 10.0
 #: Artefact thresholds: spikes narrower than this many points; broad features wider
 #: than both BROAD_HZ and BROAD_FACTOR × the median line width.
 SPIKE_POINTS = 2.5
+SOLVENT_SKIRT_FRACTION = 0.05  # of the residual's tallest line
 BROAD_HZ = 20.0
 BROAD_FACTOR = 10.0
 
@@ -110,20 +112,6 @@ def estimate_noise(y: np.ndarray, segments: int = 64) -> float:
     return float(np.median(sds[: max(1, segments // 4)])) or 1.0
 
 
-def _half_width_hz(y: np.ndarray, i: int, hz_per_pt: float) -> float:
-    h = y[i] / 2
-    left = i
-    while left > 0 and y[left] > h:
-        left -= 1
-    right = i
-    while right < y.size - 1 and y[right] > h:
-        right += 1
-    # linear interpolation of the two half-height crossings
-    lx = left + (h - y[left]) / (y[left + 1] - y[left]) if y[left + 1] != y[left] else left
-    rx = right - (h - y[right]) / (y[right - 1] - y[right]) if y[right - 1] != y[right] else right
-    return float((rx - lx) * hz_per_pt)
-
-
 def pick_peaks(
     nmr: NMRData,
     min_snr: float = 8.0,
@@ -147,7 +135,10 @@ def pick_peaks(
     for sign in signs:
         s = sign * y
         idx, _ = find_peaks(s, height=thr, prominence=thr)
-        for i in idx:
+        # at half prominence: a small line on a hump or a taller line's shoulder never
+        # falls to half its height, so that would measure the hump instead of the line
+        widths = peak_widths(s, idx, rel_height=0.5)[0] * hz_per_pt
+        for i, width in zip(idx, widths, strict=True):
             pos = refine_peak(s, int(i))
             ppm = d.offset_ppm - pos * step_ppm
             if ppm_range and not (min(ppm_range) <= ppm <= max(ppm_range)):
@@ -157,7 +148,7 @@ def pick_peaks(
                 hz=float(ppm * d.obs_mhz),
                 index=float(pos),
                 intensity=float(y[i]),
-                width_hz=_half_width_hz(s, int(i), hz_per_pt),
+                width_hz=float(width),
                 snr=float(s[i] / sigma),
             ))  # fmt: skip
     peaks.sort(key=lambda p: -p.ppm)
@@ -188,6 +179,13 @@ def _mark_solvent(pl: PeakList) -> None:
         reach = half + max(0.0, p.width_hz - BROAD_HZ) / 2
         if any(abs(p.ppm - s) * pl.obs_mhz <= reach for s in shifts):
             p.kind, p.note = "solvent", pl.solvent
+    # small lines on the shoulders of a strong residual are its skirt, not the compound's
+    own = [p.intensity for p in pl.peaks if p.kind == "solvent"]
+    if pl.nucleus == "1H" and own:
+        for p in pl.peaks:
+            if (p.kind == "compound" and p.intensity < SOLVENT_SKIRT_FRACTION * max(own)
+                    and any(abs(p.ppm - s) * pl.obs_mhz <= 2 * half for s in shifts)):  # fmt: skip
+                p.kind, p.note = "solvent", pl.solvent
 
 
 def _mark_satellites(pl: PeakList) -> None:
@@ -226,13 +224,31 @@ def _mark_impurities(pl: PeakList) -> None:
         return
     table = IMPURITIES_1H[pl.solvent]
     # Only small peaks are labelled (a big peak at 1.26 ppm is the compound's own),
-    # except water, whose shift and size vary but which is always water.
-    limit = 0.2 * max(compound)
+    # except water, whose shift and size vary: the line nearest the water shift, and
+    # any line within WATER_PEAK_HZ of it (a lumpy water peak), is water whatever its
+    # size; others nearby are water only if small (a methyl singlet beside water, e.g.
+    # at 3.34 in DMSO or 2.08 in CD3CN, is the compound's)
+    water = [
+        k for k, p in enumerate(pl.peaks)
+        if p.kind == "compound"
+        and any(abs(p.ppm - s) <= WATER_TOLERANCE_PPM for s in table.get("water", []))
+    ]  # fmt: skip
+    nearest = min(
+        water,
+        key=lambda k: min(abs(pl.peaks[k].ppm - s) for s in table["water"]),
+        default=None,
+    )
+    # sized against the compound alone: water can be the tallest line by far
+    limit = 0.2 * max(
+        (p.intensity for k, p in enumerate(pl.peaks) if p.kind == "compound" and k != nearest),
+        default=max(compound),
+    )
     candidates: dict[int, list[str]] = {}
     for k, p in enumerate(pl.peaks):
         if p.kind != "compound":
             continue
-        if any(abs(p.ppm - s) <= WATER_TOLERANCE_PPM for s in table.get("water", [])):
+        own = nearest is not None and abs(p.hz - pl.peaks[nearest].hz) <= WATER_PEAK_HZ
+        if k in water and (own or p.intensity <= limit):
             p.kind, p.note = "impurity", "water"
             continue
         if p.intensity > limit:

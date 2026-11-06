@@ -6,6 +6,11 @@ Methods
     Chebyshev polynomial of order ``order`` (default 5, as TopSpin's ABSG) fitted
     iteratively to points classified as baseline (residual within 3σ of noise). Handles
     negative peaks (DEPT, APT) and matched TopSpin's ``abs`` best on our data.
+``signalfree``
+    A Whittaker smoother through the points detected as signal-free, after Cobas et al.,
+    J. Magn. Reson. 183, 145 (2006): a point is signal if the spectrum's slope at any of
+    several scales stands out from the typical slope, plus a margin for line tails. It
+    does not assume a sign, and crowded regions are bridged rather than fitted.
 ``airpls``
     Adaptive iteratively reweighted penalized least squares (Zhang, Chen & Liang,
     Analyst 135, 1138, 2010): a Whittaker smoother whose weights drop to zero on
@@ -29,12 +34,20 @@ from typing import Literal
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.linalg import solve_banded
+from scipy.ndimage import binary_dilation, uniform_filter1d
 
 from nmrsuite.data import NMRData
 from nmrsuite.history import processing_step
 from nmrsuite.processing.utils import noise_sigma, ppm_to_index
 
-Method = Literal["airpls", "whittaker", "poly", "points"]
+Method = Literal["signalfree", "airpls", "whittaker", "poly", "points"]
+
+#: Scales (Hz) of the slope test: sharp lines, multiplets, broad humps.
+SLOPE_SCALES_HZ = (1.0, 4.0, 16.0)
+#: A point is signal when its slope exceeds this many robust σ of the typical slope.
+SLOPE_THRESHOLD = 4.0
+#: Margin (Hz) kept clear around detected signal, for line tails.
+SIGNAL_MARGIN_HZ = 10.0
 
 
 def default_lambda(n: int) -> float:
@@ -91,6 +104,18 @@ def airpls_baseline(
         w[0] = w[-1] = np.exp(np.clip(it * np.abs(neg).max() / dn, None, 50))
         w *= keep
     return z
+
+
+def signal_free_points(y: np.ndarray, hz_per_pt: float) -> np.ndarray:
+    """True at points whose slope, at every scale in SLOPE_SCALES_HZ, looks like noise."""
+    free = np.ones(y.size, bool)
+    for hz in SLOPE_SCALES_HZ:
+        w = max(1, round(hz / hz_per_pt))
+        smooth = uniform_filter1d(y, w)
+        slope = np.pad(np.abs(smooth[2 * w :] - smooth[: -2 * w]), w, mode="edge")
+        free &= slope < SLOPE_THRESHOLD * 1.4826 * np.median(slope)
+    margin = max(1, round(SIGNAL_MARGIN_HZ / hz_per_pt))
+    return ~binary_dilation(~free, iterations=margin)
 
 
 def als_baseline(
@@ -159,7 +184,9 @@ def baseline(
     y = np.real(nmr.data).astype(float)
     keep = _mask_from_regions(nmr, exclude_ppm)
     lam = default_lambda(y.size) if lam is None else lam
-    if method == "airpls":
+    if method == "signalfree":
+        z = _whittaker(y, (keep & signal_free_points(y, d.sw_hz / d.size)).astype(float), lam)
+    elif method == "airpls":
         z = airpls_baseline(y, lam, keep)
     elif method == "whittaker":
         z = als_baseline(y, lam, keep, p=p)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from conftest import multiplet_lines, synth_spectrum
@@ -21,7 +22,7 @@ from nmrsuite.analysis.multiplet_firstorder import (
     _integrate,
     stick_pattern,
 )
-from nmrsuite.analysis.peaks import Peak
+from nmrsuite.analysis.peaks import Peak, pick_peaks
 from nmrsuite.report import ACS, RSC, WILEY, custom_style, format_multiplet, proton_report
 
 CASES = [
@@ -199,3 +200,37 @@ def test_carbon_report() -> None:
                        solvent="CDCl3", fwhm_hz=3.0, noise=1e-4)  # fmt: skip
     text = carbon_report(s, pick_peaks(s))
     assert text == "¹³C NMR (125 MHz, CDCl₃) δ 170.1, 60.4, 14.2."
+
+
+def test_small_signals_do_not_set_the_proton_scale() -> None:
+    tiny = [(p, 0.004) for p in (9.0, 8.5, 6.0, 5.5, 5.0, 3.0)]
+    s = synth_spectrum([(7.0, 1.0), (4.0, 3.0), (2.0, 2.0), *tiny], noise=1e-5)
+    counts = {round(m.ppm): m.n_h for m in detect_multiplets(s) if m.n_h}
+    assert counts == {7: 1, 4: 3, 2: 2}
+
+
+def test_line_on_a_hump_measures_its_own_width() -> None:
+    s = synth_spectrum([(3.0, 0.02), (3.02, 0.03)], noise=1e-5)
+    ppm = s.direct.ppm_axis()
+    hump = s.data.real.max() * 3 * np.exp(-(((ppm - 3.0) / 0.5) ** 2))
+    p = pick_peaks(s.copy_with(data=s.data + hump)).peaks
+    assert min(p, key=lambda q: abs(q.ppm - 3.0)).width_hz < 5.0
+
+
+def test_small_lines_beside_a_strong_residual_are_solvent() -> None:
+    quintet = [
+        (1.94 + k * 2.5 / 500, a) for k, a in zip(range(-2, 3), (1, 2, 3, 2, 1), strict=True)
+    ]
+    s = synth_spectrum([*quintet, (1.92, 0.02), (7.0, 1.0)], noise=1e-5, solvent="CD3CN")
+    kinds = {round(p.ppm, 2): p.kind for p in pick_peaks(s).peaks}
+    assert kinds[1.92] == "solvent" and kinds[7.0] == "compound"
+
+
+def test_methyl_beside_water_in_dmso_is_the_compound() -> None:
+    """Vismodegib-like: a CH3 singlet at 3.345 next to a taller water line at 3.33."""
+    dmso = [(2.50 + k * 0.0036, a) for k, a in zip(range(-2, 3), (1, 2, 3, 2, 1), strict=True)]
+    lines = [(7.59, 1.0), (7.45, 1.0), (3.345, 3.0), (3.33, 10.0), (2.53, 0.02), *dmso]
+    s = synth_spectrum(lines, noise=1e-5, solvent="DMSO-d6")
+    counts = [(m.ppm, m.n_h) for m in detect_multiplets(s) if m.n_h]
+    assert [n for _, n in counts] == [1, 1, 3]
+    assert counts[-1][0] == pytest.approx(3.345, abs=0.005)

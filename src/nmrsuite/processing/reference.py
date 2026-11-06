@@ -123,6 +123,9 @@ SEARCH_WINDOW_X_PPM = 1.5
 #: multiplet that happens to sit near the expected shift).
 ISOLATION_FRACTION = 0.25
 ISOLATION_HZ = (1.5, 15.0)
+#: With nothing isolated, a line taller than its neighbours by this fraction's inverse
+#: stands out: a singlet on a ¹³C satellite pattern, in a concentrated sample.
+DOMINANT_FRACTION = 0.67
 
 
 def _local_maxima(y: np.ndarray, threshold: float) -> np.ndarray:
@@ -131,13 +134,18 @@ def _local_maxima(y: np.ndarray, threshold: float) -> np.ndarray:
 
 
 def _is_isolated(
-    y: np.ndarray, maxima: np.ndarray, i: int, pts_per_hz: float, pattern_hz: float
+    y: np.ndarray,
+    maxima: np.ndarray,
+    i: int,
+    pts_per_hz: float,
+    pattern_hz: float,
+    fraction: float = ISOLATION_FRACTION,
 ) -> bool:
     near = np.abs(maxima - i)
     lo = (pattern_hz + ISOLATION_HZ[0]) * pts_per_hz
     hi = (pattern_hz + ISOLATION_HZ[1]) * pts_per_hz
     neighbours = maxima[(near >= lo) & (near <= hi)]
-    return not np.any(y[neighbours] >= ISOLATION_FRACTION * y[i])
+    return not np.any(y[neighbours] >= fraction * y[i])
 
 
 def find_reference_peak(
@@ -173,11 +181,15 @@ def find_reference_peak(
     pts_per_hz = d.size / d.sw_hz
     pool = cand
     if prefer_isolated:
-        iso = np.array(
-            [i for i in cand if _is_isolated(y, maxima, int(i), pts_per_hz, pattern_hz)], int
-        )
-        if iso.size:
-            pool = iso
+        for fraction in (ISOLATION_FRACTION, DOMINANT_FRACTION):
+            iso = np.array(
+                [i for i in cand
+                 if _is_isolated(y, maxima, int(i), pts_per_hz, pattern_hz, fraction)],
+                int,
+            )  # fmt: skip
+            if iso.size:
+                pool = iso
+                break
     ppms = d.offset_ppm - pool * step
     best = int(pool[np.argmin(np.abs(ppms - expected_ppm))])
     if pattern_hz:
