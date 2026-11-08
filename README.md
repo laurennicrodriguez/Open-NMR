@@ -1,6 +1,6 @@
 # Open-NMR (nmrsuite)
 
-Open-source NMR processing and analysis for small-molecule chemists: Mnova-level
+Open-source NMR processing and analysis for small-molecule chemists: complete
 everyday 1D/2D processing first, then quantum-mechanical multiplet fitting that
 handles second-order, overlapped and long-range-coupled systems correctly.
 
@@ -18,7 +18,7 @@ implementation brief: core library and multiplet engine first, test-first, GUI l
 | 4. Spin engine: Hamiltonian and exact simulation (AB/ABX validated) | **done** |
 | 5. Lineshape fitting with global search and uncertainties | **done** |
 | 6. Automatic second-order detection (Δν/J < 10) routing regions to the fit | next |
-| 7–9. Benchmark harness vs Mnova, joint 500 + 600 MHz fits, GUI | not started |
+| 7–9. Benchmark harness vs expert analyses, joint 500 + 600 MHz fits, GUI | not started |
 
 ### Lineshape fitting (step 5)
 
@@ -62,8 +62,7 @@ J within ±0.1 Hz and δ within ±0.001 ppm from deliberately wrong starts, and 
 On real data (LR-7-82-2, 500 MHz, CD₃CN) the pyridinium ring fits as AA′BB′C to 4.6 %
 of the tallest line, giving δ 8.893 / 8.198 / 8.695 and J₂₃ 6.20, J₃₄ 7.89, J₂₄ 1.29,
 J₃₅ 1.35, J₂₆ 1.42, J₂₅ 0.75 Hz; the para-aryl ring fits as AA′BB′ (J_o 8.65, J_p 0.45 Hz).
-With regions drawn by hand, Mnova resolves only the para-H (tt, J = 7.9, 1.4 Hz) and reports
-the other four signals as "m". A hand first-order reading of the line spacings gives 5.6, 7.1
+A hand first-order reading of the line spacings gives 5.6, 7.1
 and 7.9 Hz for the ortho couplings: H3's 7.1 Hz t is the average of J₂₃ and J₃₄, not a coupling.
 
 **Known limitations**
@@ -131,8 +130,7 @@ Simulated multiplets (d … ddt, 13 patterns) are recovered with J within ±0.1 
 **Known limitations**
 
 - Proton counts without a formula are a suggestion: an incomplete multiplet can halve
-  the scale. Use `--total-h` or `--normalize PPM=N` (Mnova also normalizes to a chosen
-  multiplet).
+  the scale. Use `--total-h` or `--normalize PPM=N`.
 - Second-order multiplets (AA′BB′, ABX, roofed AB) are not yet fitted; they come out as
   `m` or with apparent splittings. This is what the spin engine (steps 4–6) is for.
 - ¹³C reports list shifts only; C–F/C–P doublets and DEPT editing labels come later.

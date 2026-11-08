@@ -1,4 +1,4 @@
-"""First-order multiplet analysis (Mnova-parity level).
+"""First-order multiplet analysis.
 
 Lines (picked peaks) are clustered into multiplets. For each cluster we search for the
 set of couplings — each a J value with ``n`` equivalent partners — whose first-order
