@@ -1,7 +1,0 @@
-# Mnova fully automatic multiplet report, as provided by Lauren on 2026-11-02.
-# Compound: LR-6-56 (raw folder "LR-6-56-Et2O"), indolizidine-201 (natural product,
-# previously synthesized and published; cleared for publication).
-# Mnova version: 14.2.3-29241 (x86_64).
-# Method: fully automatic multiplet analysis; auto phase and auto baseline correction;
-# solvent peak set by hand.
-1H NMR (500 MHz, CDCl3) δ 7.39 – 7.26 (m, 6H), 7.26 – 7.18 (m, 1H), 2.97 – 2.91 (dd, J = 11.0, 2.9 Hz, 1H), 2.77 – 2.70 (td, J = 8.8, 1.9 Hz, 1H), 2.02 – 1.92 (tdd, J = 10.4, 6.2, 2.4 Hz, 1H), 1.78 – 1.18 (m, 8H).

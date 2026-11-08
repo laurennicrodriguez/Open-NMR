@@ -3,7 +3,7 @@
   "experiment": "1",
   "solvent": "CDCl3",
   "reference_ppm": 7.26,
-  "source": "Hand-drawn Mnova multiplet ranges, from mnova_manual_report.txt, lowered by 0.026 ppm to align with CHCl3 = 7.26",
+  "source": "Hand-drawn multiplet ranges, lowered by 0.026 ppm to align with CHCl3 = 7.26",
   "regions_ppm": [
     [7.364, 7.324],
     [7.314, 7.274],
